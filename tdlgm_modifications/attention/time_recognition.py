@@ -106,7 +106,7 @@ class TimeRecognition(nn.Module):
 
 if __name__ == "__main__":
 
-
+#[
     m = TimeRecognition(input_dim=2, network_size=[10,10], batches=[2,1], seq_len=3, state_dim=10)
     seq = torch.rand((10,2,2))
     res = m(seq)
