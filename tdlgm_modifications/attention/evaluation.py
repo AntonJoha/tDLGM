@@ -13,11 +13,10 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 gen = Datagen(device)
 
 
-def get_lots_yhat(m,x, seq_len=1):
+def get_lots_yhat(m,x):
     res = []
     m.eval()
-    m.make_internal_state()
-    m.make_
+    m.make_xi()
     prev = x[0]
     for i in range(100000):
         un = prev.unsqueeze(0)
@@ -28,20 +27,15 @@ def get_lots_yhat(m,x, seq_len=1):
         
     return res
 
-def get_yhat(m,m_r, m_t, x, x_1, forcing=True, seq_len=1):
+def get_yhat(m,m_r, m_t, x, x_1):
     res = []
     m.eval()
-    m.make_internal_state()
-    prev = x[0]
+
     for i, i_1 in zip(x,x_1):
-        if forcing:
-            t = m_t(i.unsqueeze(0))
-            rec = m_r(i_1.unsqueeze(0))
-            m.set_xi(rec[-1])
-            m.set_internal_state(t)
-        else:
-            m.make_xi()
-        val, _ = m()
+        _,_, state = m_t(i.unsqueeze(0))
+        rec = m_r(i_1.unsqueeze(0)[:,-1,:])
+        m.set_xi(rec[-1])
+        val = m(state)
         res.append(val.detach().cpu()[0][-1])
     return torch.tensor(res)
 
@@ -86,7 +80,7 @@ def add_run(s,to_add, filename="entries.json"):
         f.write(json.dumps(entries, indent=4))
     
 
-def _generate_test(m, m_r, m_t, seq_len, variance=0, prob=0,times=10):
+def _generate_test(m, m_r, m_t,variance=0, prob=0,times=10, seq_len=10):
 
     x_test, y_test, x_test_1 = gen.get_test_data(seq_len, variance, prob)
 
@@ -96,7 +90,7 @@ def _generate_test(m, m_r, m_t, seq_len, variance=0, prob=0,times=10):
     y_true = y_test.squeeze()
 
     for i in range(times):
-        res = get_yhat(m,m_r, m_t, x_test, x_test_1, forcing=True, seq_len=1).to(device)
+        res = get_yhat(m,m_r, m_t, x_test, x_test_1).to(device)
         results.append(res)
         diff = torch.sub(res, y_true)
         results_diff.append(diff)
@@ -106,12 +100,11 @@ def _generate_test(m, m_r, m_t, seq_len, variance=0, prob=0,times=10):
 def generate_test(m, m_r, m_t, conf, times=10):
 
     to_return = []
-    x_test, y_test, x_test_1 = gen.get_test_data(conf["seq_len"], 0,0)
 
     var = [0.001, 0.01, 0.005, 0.05, 0]
     data_prob = [i/5 for i in range(1,6)]
     for v, p in zip(var, data_prob):
-        results, results_diff = _generate_test(m, m_r, m_t,conf["seq_len"], conf["variance"], conf["data_prob"], times)
+        results, results_diff = _generate_test(m, m_r, m_t, conf["variance"], conf["data_prob"], times, conf["seq_len"])
         to_return.append({ "variance": v, 
                           "probability": p,
                           "results": [r.detach().cpu().tolist() for r in results],
@@ -131,31 +124,31 @@ def _future_steps(m,m_r, m_t, x, x_1,y, steps=1):
 
     for i in range(len(x)):
         
-        
-        m.make_internal_state()
 
         x_u = x[i].unsqueeze(0)
         x_1_u = x_1[i].unsqueeze(0)
-        t = m_t(x_u)
-        rec = m_r(x_1_u)
+        _,_,t = m_t(x_u)
+        rec = m_r(x_1_u[:,-1,:])
         m.set_xi(rec[-1])
-        m.set_internal_state(t)
-        _,_ = m()
-
+        r= m(t)
+        x_u = torch.cat((x_u[:,1:,:], r.unsqueeze(0)), dim=1)
         # Cheap way of protecting against out of index errors.
+        y_hat = []
+        y_true = []
         try:
-            y_hat = []
-            y_true = []
             for j in range(steps):
                 m.make_xi()
-                val, _ = m()
+                _,_,t = m_t(x_u)
+                val = m(t)
                 y_hat.append(val.detach().cpu()[0][-1])
+
+                x_u = torch.cat((x_u[:,1:,:], val.unsqueeze(0)), dim=1)
 
                 y_true.append(y[j+1+i].detach().cpu())
             res.append({"generated": [r.detach().cpu().tolist() for r in y_hat], "true": [r.detach().cpu().tolist()[0] for r in y_true]})
         except:
             pass
-    
+
     return res
         
             
@@ -188,14 +181,15 @@ def evaluate_model(m ,m_r, m_t,x,y, x_1,x_test,y_test, x_test_1,conf, draw_image
     conf_str = str(conf).replace(" ", "").replace("/","").replace(":","").replace("'", "").replace("{","").replace("}","")
     model_name = conf_str
 
-    to_add["future"] = future_steps(m, m_r, m_t, x, x_1, y)
-    to_add["future_eval"] = evaluate_future_steps(to_add["future"])
 
     to_add["test_run"] = generate_test(m, m_r, m_t, conf)
 
+    to_add["future"] = future_steps(m, m_r, m_t, x, x_1, y)
+    to_add["future_eval"] = evaluate_future_steps(to_add["future"])
 
-    to_add["y_hat"] = [get_yhat(m, m_r, m_t,x, x_1, forcing=False, seq_len=conf["seq_len"]).cpu().numpy().tolist() for _ in range(2)]
-    to_add["y_hat_forced"] = [get_yhat(m, m_r, m_t,x, x_1, forcing=True, seq_len=conf["seq_len"]).cpu().numpy().tolist() for _ in range(2)]
+
+
+    to_add["y_hat_forced"] = [get_yhat(m, m_r, m_t,x, x_1).cpu().numpy().tolist() for _ in range(2)]
 
     
     add_run(conf_str, to_add)

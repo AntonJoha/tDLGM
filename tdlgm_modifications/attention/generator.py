@@ -67,7 +67,6 @@ class Layer(nn.Module):
         
         att, _ = self.attention(query, key, val)
         res = att.reshape(att.shape[0], -1)
-
         in_data = torch.cat((res,h),dim=-1)
 
         return self.ffn(in_data) + xi
