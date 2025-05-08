@@ -66,7 +66,8 @@ class Layer(nn.Module):
         val = val
         
         att, _ = self.attention(query, key, val)
-        res = att.transpose(0,1).reshape(att.shape[1], att.shape[0]*att.shape[2])
+        res = att.reshape(att.shape[0], -1)
+
         in_data = torch.cat((res,h),dim=-1)
 
         return self.ffn(in_data) + xi
@@ -124,7 +125,6 @@ class Generator(nn.Module):
             self.make_xi(batch_size)
 
         assert self.xi is not None
-        print("XI SHAPE:", self.xi[0].shape)
         h_out = self.H_L(self.xi[0])
 
         for h, s, xi in zip(self.h_l, state_space, self.xi[1:]):

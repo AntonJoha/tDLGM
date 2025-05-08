@@ -77,11 +77,16 @@ class TimeRecognition(nn.Module):
 
 
     def get_data(self, seq, batches):
+        p = list(torch.split(seq, batches, dim=1)[-self.seq_len:])
+        #padding
+        entries = p[0].shape[1]
+        if p[-1].shape[1] != entries:
+            p[-1] = torch.cat((p[-1], torch.zeros(p[-1].shape[0], entries - p[-1].shape[1], p[-1].shape[2])), dim=1)
 
-        t = torch.stack(torch.split(seq, batches, dim=0)[:self.seq_len])  # Shape: (seq_len, batch_size, time_steps, features)
+        res = torch.stack(p, dim=1) # Shape: (batch_size, seq_len, time_steps, features)
+        
 
-        res = t.transpose(2, 1).reshape(t.shape[0], t.shape[2], -1)  #
-        print("DONE:", res.shape)
+        res = res.reshape(res.shape[0], res.shape[1], -1) # Shape: (batch_size, seq_len, time_steps*features)
         return res
 
 
@@ -97,7 +102,6 @@ class TimeRecognition(nn.Module):
             z.append(z_curr)
         
 
-        print("mean: ", mean)
         return mean, r, z
     
 
