@@ -1,9 +1,31 @@
 from itertools import chain
 
+from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+@dataclass(slots=True)
+class tDLGMConfig:
+    # Architecture
+    input_dim: int = 10
+    hidden_size: int = 20
+    latent_dim: int = 5
+    output_dim: int = 10
+    layers: int = 2
+    seq_len: int = 3
+
+    # Training
+    learning_rate: float = 1e-3
+    batch_size: int = 64
+    gradient_clip_norm: float = 5.0
+    consistency_weight: float = 0.01
+
+    # Misc
+    seed: int = 42
+    device: str | None = None
 
 
 # ── Time Recognition ──────────────────────────────────────────────────────────
@@ -47,26 +69,19 @@ class TimeLayer(nn.Module):
 
 
 class TimeRecognition(nn.Module):
-    def __init__(
-        self,
-        input_dim=1,
-        hidden_size=1,
-        seq_len=1,
-        layers=1,
-        device=None,
-    ):
+    def __init__(self, config):
         super().__init__()
 
-        self.layers = layers
+        self.layers = config.layers
 
         self.time_layers = nn.ModuleList(
             [
                 TimeLayer(
-                    input_dim=input_dim,
-                    hidden_size=hidden_size,
+                    input_dim=config.input_dim,
+                    hidden_size=config.hidden_size,
                     device=device,
                 )
-                for _ in range(layers)
+                for _ in range(config.layers)
             ]
         )
 
@@ -183,36 +198,28 @@ class GenLayer(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(
-        self,
-        hidden_size=1,
-        latent_dim=1,
-        output_dim=1,
-        layers=1,
-        seq_len=1,
-        device=None,
-    ):
+    def __init__(self, config):
         super().__init__()
 
-        self.layers = layers
-        self.seq_len = seq_len
-        self.latent_dim = latent_dim
+        self.layers = config.layers
+        self.seq_len = config.seq_len
+        self.latent_dim = config.latent_dim
 
         self.gen_layers = nn.ModuleList(
             [
                 GenLayer(
-                    hidden_size,
-                    latent_dim,
+                    config.hidden_size,
+                    config.latent_dim,
                     device,
                 )
-                for _ in range(layers)
+                for _ in range(config.layers)
             ]
         )
 
         self.initial_transform = nn.Sequential(
             nn.Linear(
-                latent_dim,
-                hidden_size,
+                config.latent_dim,
+                config.hidden_size,
                 device=device,
             ),
             nn.Tanh(),
@@ -220,8 +227,8 @@ class Generator(nn.Module):
 
         self.output_layer = nn.Sequential(
             nn.Linear(
-                hidden_size,
-                output_dim,
+                config.hidden_size,
+                config.output_dim,
                 device=device,
             )
         )
@@ -306,29 +313,24 @@ class Generator(nn.Module):
 
 
 class RecLayer(nn.Module):
-    def __init__(
-        self,
-        input_dim=1,
-        latent_dim=1,
-        device=None,
-    ):
+    def __init__(self, config):
         super().__init__()
 
-        self.latent_dim = latent_dim
+        self.latent_dim = config.latent_dim
 
         self.mean = nn.Sequential(
             nn.Linear(
-                input_dim,
-                latent_dim,
-                device=device,
+                config.input_dim,
+                config.latent_dim,
+                device=config.device,
             ),
-            nn.Tanh(),
+            nn.ReLU(),
         )
 
         self.log_var = nn.Sequential(
             nn.Linear(
-                input_dim,
-                latent_dim,
+                config.input_dim,
+                config.latent_dim,
                 device=device,
             )
         )
@@ -354,24 +356,11 @@ class RecLayer(nn.Module):
 
 
 class Recognition(nn.Module):
-    def __init__(
-        self,
-        input_dim=1,
-        latent_dim=1,
-        layers=1,
-        device=None,
-    ):
+    def __init__(self, config):
         super().__init__()
 
         self.rec_layers = nn.ModuleList(
-            [
-                RecLayer(
-                    input_dim,
-                    latent_dim,
-                    device,
-                )
-                for _ in range(layers + 1)
-            ]
+            [RecLayer(config) for _ in range(config.layers + 1)]
         )
 
     def forward(
@@ -399,39 +388,17 @@ class Recognition(nn.Module):
 class tDLGM(nn.Module):
     def __init__(
         self,
-        input_dim=1,
-        hidden_size=1,
-        latent_dim=1,
-        output_dim=1,
-        layers=1,
-        seq_len=1,
-        device=None,
+        config: tDLGMConfig,
     ):
         super().__init__()
 
-        self.model_t = TimeRecognition(
-            input_dim,
-            hidden_size,
-            seq_len,
-            layers,
-            device,
-        )
+        self.config = config
 
-        self.model_g = Generator(
-            hidden_size,
-            latent_dim,
-            output_dim,
-            layers,
-            seq_len,
-            device,
-        )
+        self.model_t = TimeRecognition(config)
 
-        self.model_r = Recognition(
-            input_dim,
-            latent_dim,
-            layers,
-            device,
-        )
+        self.model_g = Generator(config)
+
+        self.model_r = Recognition(config)
 
         self.mse = nn.MSELoss()
 
@@ -631,20 +598,15 @@ class tDLGM(nn.Module):
 # ── Self Test ────────────────────────────────────────────────────────────────
 
 
-if __name__ == "__main__":
+def main():
+
     from torch.optim import Adam
 
     torch.manual_seed(42)
 
-    model = tDLGM(
-        input_dim=10,
-        hidden_size=20,
-        latent_dim=5,
-        output_dim=10,
-        layers=2,
-        seq_len=3,
-        device=device,
-    ).to(device)
+    config = tDLGMConfig()
+
+    model = tDLGM(config).to(device)
 
     optimizer = Adam(
         model.get_parameters(),
@@ -757,3 +719,7 @@ if __name__ == "__main__":
     assert after < before, "Model did not improve"
 
     print("Test passed.")
+
+
+if __name__ == "__main__":
+    main()
