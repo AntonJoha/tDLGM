@@ -1,8 +1,8 @@
+from dataclasses import dataclass
 from itertools import chain
 
-from dataclasses import dataclass
 import torch
-import torch.nn as nn
+from torch import nn
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
