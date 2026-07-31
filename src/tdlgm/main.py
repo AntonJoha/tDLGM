@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import csv
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+import optuna
 import torch
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset, random_split
@@ -11,6 +14,7 @@ from torch.utils.data import DataLoader, Dataset, random_split
 from tdlgm.tDLGM import device, tDLGM, tDLGMConfig
 
 DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -18,10 +22,13 @@ class SeriesConfig:
     seq_len: int = 12
     batch_size: int = 8
     epochs: int = 80
+    tuning_trials: int = 8
+    tuning_epochs: int = 20
     hidden_size: int = 32
     latent_dim: int = 8
     learning_rate: float = 1e-3
     train_fraction: float = 0.8
+    seed: int = 42
 
 
 class WindowedSeriesDataset(Dataset):
@@ -66,7 +73,7 @@ def make_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoader]:
         train_size -= 1
         val_size = 1
 
-    generator = torch.Generator().manual_seed(42)
+    generator = torch.Generator().manual_seed(config.seed)
     train_dataset, val_dataset = random_split(
         dataset,
         [train_size, val_size],
@@ -107,10 +114,17 @@ def evaluate(model: tDLGM, loader: DataLoader) -> float:
     return sum(losses) / max(1, len(losses))
 
 
-def train() -> None:
-    torch.manual_seed(42)
+def configure_logging(verbose: bool) -> None:
+    logging.basicConfig(
+        level=logging.INFO if verbose else logging.WARNING,
+        format="%(message)s",
+    )
+    optuna.logging.set_verbosity(
+        optuna.logging.INFO if verbose else optuna.logging.WARNING,
+    )
 
-    runtime = SeriesConfig()
+
+def build_runtime_model(runtime: SeriesConfig) -> tuple[tDLGM, Adam]:
     model_config = tDLGMConfig(
         input_dim=1,
         hidden_size=runtime.hidden_size,
@@ -120,32 +134,125 @@ def train() -> None:
         seq_len=runtime.seq_len,
         learning_rate=runtime.learning_rate,
         batch_size=runtime.batch_size,
+        seed=runtime.seed,
     )
 
     model = tDLGM(model_config).to(device)
     optimizer = Adam(model.get_parameters(), lr=runtime.learning_rate)
-    train_loader, val_loader = make_dataloaders(runtime)
+    return model, optimizer
 
-    before = evaluate(model, val_loader)
-    print(f"Validation loss before training: {before:.5f}")
+
+def train_model(
+    runtime: SeriesConfig,
+    epochs: int | None = None,
+    verbose: bool = True,
+) -> tuple[float, float]:
+    torch.manual_seed(runtime.seed)
+
+    model, optimizer = build_runtime_model(runtime)
+    train_loader, val_loader = make_dataloaders(runtime)
+    train_epochs = runtime.epochs if epochs is None else epochs
+
+    before = evaluate(model, val_loader) if verbose else float("nan")
+    if verbose:
+        logger.info("Validation loss before training: %.5f", before)
 
     model.train()
-    for epoch in range(runtime.epochs):
+    for epoch in range(train_epochs):
         epoch_losses = []
         for batch in train_loader:
             x, x_1, y = unpack_batch(batch)
             epoch_losses.append(model.train_step(x, x_1, y, optimizer))
 
-        if (epoch + 1) % 10 == 0 or epoch == 0:
+        if verbose and ((epoch + 1) % 10 == 0 or epoch == 0):
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
-            print(f"Epoch {epoch + 1:03d}: {mean_loss:.5f}")
+            logger.info("Epoch %03d: %.5f", epoch + 1, mean_loss)
 
     after = evaluate(model, val_loader)
-    print(f"Validation loss after training: {after:.5f}")
+    if verbose:
+        logger.info("Validation loss after training: %.5f", after)
+    return before, after
+
+
+def tune_hyperparameters(
+    base_runtime: SeriesConfig,
+    verbose: bool = True,
+) -> SeriesConfig:
+    def objective(trial: optuna.Trial) -> float:
+        runtime = replace(
+            base_runtime,
+            seq_len=trial.suggest_categorical("seq_len", [6, 8, 12]),
+            batch_size=trial.suggest_categorical("batch_size", [4, 8, 16]),
+            hidden_size=trial.suggest_categorical("hidden_size", [16, 32, 64]),
+            latent_dim=trial.suggest_categorical("latent_dim", [4, 8, 16]),
+            learning_rate=trial.suggest_float(
+                "learning_rate",
+                1e-4,
+                5e-3,
+                log=True,
+            ),
+        )
+
+        _, after = train_model(
+            runtime,
+            epochs=runtime.tuning_epochs,
+            verbose=False,
+        )
+        return after
+
+    sampler = optuna.samplers.TPESampler(seed=base_runtime.seed)
+    study = optuna.create_study(direction="minimize", sampler=sampler)
+    study.optimize(objective, n_trials=base_runtime.tuning_trials)
+
+    best_runtime = replace(base_runtime, **study.best_trial.params)
+    if verbose:
+        logger.info("Best hyperparameters: %s", study.best_trial.params)
+        logger.info("Best validation loss during tuning: %.5f", study.best_value)
+    return best_runtime
+
+
+def train(use_tuning: bool = True, verbose: bool = False) -> None:
+    base_runtime = SeriesConfig()
+    torch.manual_seed(base_runtime.seed)
+    if verbose:
+        logger.info(
+            "Starting training with %s.", "tuning" if use_tuning else "no tuning"
+        )
+    runtime = (
+        tune_hyperparameters(base_runtime, verbose=verbose)
+        if use_tuning
+        else base_runtime
+    )
+    if verbose and not use_tuning:
+        logger.info("Skipping hyperparameter tuning.")
+    train_model(runtime, verbose=verbose)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train the tDLGM time-series example.")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "--tune",
+        action="store_true",
+        help="Run Optuna hyperparameter tuning before final training.",
+    )
+    group.add_argument(
+        "--no-tune",
+        action="store_true",
+        help="Skip Optuna hyperparameter tuning and train with the default settings.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable logging output during tuning and training.",
+    )
+    return parser.parse_args()
 
 
 def main() -> None:
-    train()
+    args = parse_args()
+    configure_logging(args.verbose)
+    train(use_tuning=args.tune, verbose=args.verbose)
 
 
 if __name__ == "__main__":

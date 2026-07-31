@@ -6,6 +6,7 @@ let
   python = pkgs.python3.withPackages (ps: with ps; [
     jupyterlab
     ipykernel
+    optuna
     matplotlib
     numpy
     pandas
