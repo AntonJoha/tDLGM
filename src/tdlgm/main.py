@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import csv
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -194,15 +195,26 @@ def tune_hyperparameters(base_runtime: SeriesConfig) -> SeriesConfig:
     return best_runtime
 
 
-def train() -> None:
+def train(use_tuning: bool = True) -> None:
     base_runtime = SeriesConfig()
     torch.manual_seed(base_runtime.seed)
-    tuned_runtime = tune_hyperparameters(base_runtime)
-    train_model(tuned_runtime)
+    runtime = tune_hyperparameters(base_runtime) if use_tuning else base_runtime
+    train_model(runtime)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train the tDLGM time-series example.")
+    parser.add_argument(
+        "--no-tune",
+        action="store_true",
+        help="Skip Optuna hyperparameter tuning and train with the default settings.",
+    )
+    return parser.parse_args()
 
 
 def main() -> None:
-    train()
+    args = parse_args()
+    train(use_tuning=not args.no_tune)
 
 
 if __name__ == "__main__":
