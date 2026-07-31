@@ -204,7 +204,13 @@ def train(use_tuning: bool = True) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the tDLGM time-series example.")
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "--tune",
+        action="store_true",
+        help="Run Optuna hyperparameter tuning before final training.",
+    )
+    group.add_argument(
         "--no-tune",
         action="store_true",
         help="Skip Optuna hyperparameter tuning and train with the default settings.",
@@ -214,7 +220,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    train(use_tuning=not args.no_tune)
+    train(use_tuning=args.tune)
 
 
 if __name__ == "__main__":
