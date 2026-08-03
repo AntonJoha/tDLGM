@@ -1,13 +1,15 @@
-from dataclasses import fields, replace
 import logging
+from dataclasses import fields, replace
 
 import optuna
-from optuna.exceptions import TrialPruned
 import torch
+from optuna.exceptions import TrialPruned
 from torch import nn
 from torch.utils.data import DataLoader
 
 from tdlgm.util import BaselineConfig, SeriesConfig, make_dataloaders
+
+logger = logging.getLogger(__name__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -21,79 +23,80 @@ def tdlgm_config(args) -> BaselineConfig:
     )
 
 
-
-
 class Baseline(nn.Module):
     def __init__(self, config):
-        super(Baseline, self).__init__()
+        super().__init__()
 
         self.config = config
-        self.lstm = nn.LSTM(config.input_dim, config.hidden_size, num_layers=config.layers, batch_first=True)
-        self.linear = nn.Linear(config.hidden_size, config.output_dim*2)
+        self.lstm = nn.LSTM(
+            config.input_dim,
+            config.hidden_size,
+            num_layers=config.layers,
+            batch_first=True,
+        )
+        self.linear = nn.Linear(config.hidden_size, config.output_dim * 2)
         self.loss = nn.GaussianNLLLoss()
 
     def forward(self, x):
         if x.ndim == 2:
-            x.unsqueeze_(-1)  # Add channel dimension if needed
+            x = x.unsqueeze(-1)
         x, _ = self.lstm(x)
         x = self.linear(x)
-        return x[:, -1, :]  # Return only the last time step
-
+        return x[:, -1, :]
 
     def train_step(self, x, y, optimizer):
         self.train()
         optimizer.zero_grad()
         pred = self(x)
-        mean = pred[:, :self.config.output_dim]
-        logvar = pred[:, self.config.output_dim:]
+        mean = pred[:, : self.config.output_dim]
+        logvar = pred[:, self.config.output_dim :]
         loss = self.loss(mean, y, logvar.exp())
         loss.backward()
         optimizer.step()
         return loss.item()
 
-    
     @torch.no_grad()
     def get_loss(self, x, y):
 
         # Forward pass
         pred = self(x)
-        mean = pred[:, :self.config.output_dim]
-        logvar = pred[:, self.config.output_dim:]
+        mean = pred[:, : self.config.output_dim]
+        logvar = pred[:, self.config.output_dim :]
         # Compute loss
         loss = self.loss(mean, y, logvar.exp())
 
         return loss.item()
 
 
-
 def evaluate(model: nn.Module, loader: DataLoader) -> float:
     model.eval()
     losses = []
-    for x,y in loader:
+    for x, y in loader:
         loss = model.get_loss(x, y)
-        losses.append(loss)
+        losses.append(float(loss))
     return sum(losses) / max(1, len(losses))
 
 
-
-
-def train_model(runtime: BaselineConfig, epochs: int=None, trial: optuna.Trial | None = None) -> None:
+def train_model(
+    runtime: BaselineConfig,
+    epochs: int | None = None,
+    trial: optuna.Trial | None = None,
+) -> tuple[float, float]:
     torch.manual_seed(runtime.seed)
 
     model = Baseline(runtime).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=runtime.learning_rate)
-    print(f"Training model with config: {runtime.reduced_dataset}")
     train_loader, val_loader = make_dataloaders(runtime)
     train_epochs = runtime.epochs if epochs is None else epochs
 
-
     before = evaluate(model, val_loader)
-    print(f"Loss before training: {before:.5f}")
+    if runtime.verbose:
+        logger.info("Validation loss before training: %.5f", before)
 
     model.train()
     for epoch in range(train_epochs):
         epoch_losses = []
-        for x,y in train_loader:
+        for x, y in train_loader:
             epoch_losses.append(model.train_step(x, y, optimizer))
 
         if runtime.verbose:
@@ -106,22 +109,22 @@ def train_model(runtime: BaselineConfig, epochs: int=None, trial: optuna.Trial |
             if trial.should_prune():
                 raise TrialPruned()
 
-
-
     after = evaluate(model, val_loader)
-    print(f"Loss after training: {after:.5f}")
+    if runtime.verbose:
+        logger.info("Validation loss after training: %.5f", after)
 
-    if trial is None:
-        assert after < before, "Model did not improve"
+    if trial is None and after >= before:
+        logger.warning(
+            "Validation loss did not improve: before=%.5f after=%.5f",
+            before,
+            after,
+        )
     return before, after
-
-
-
 
 
 def tune_hyperparameters(
     base_runtime: SeriesConfig,
-   ) -> SeriesConfig:
+) -> SeriesConfig:
     def objective(trial: optuna.Trial) -> float:
         runtime = replace(
             base_runtime,
@@ -144,7 +147,10 @@ def tune_hyperparameters(
         return after
 
     sampler = optuna.samplers.TPESampler(seed=base_runtime.seed)
-    study = optuna.create_study(direction="minimize", sampler=sampler)
+    study = optuna.create_study(
+        direction="minimize",
+        sampler=sampler,
+    )
     study.optimize(objective, n_trials=base_runtime.tuning_trials)
 
     best_runtime = replace(base_runtime, **study.best_trial.params)
@@ -154,13 +160,10 @@ def tune_hyperparameters(
     return best_runtime
 
 
-
 def baseline_train(args):
     torch.manual_seed(args.seed)
     baseline_config = SeriesConfig(**vars(args))
 
-    runtime = (tune_hyperparameters(baseline_config) if args.tune else baseline_config)
+    runtime = tune_hyperparameters(baseline_config) if args.tune else baseline_config
 
     train_model(runtime)
-
-

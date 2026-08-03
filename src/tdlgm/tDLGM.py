@@ -349,7 +349,6 @@ class RecLayer(nn.Module):
 
         z = mean + eps * std
 
-       
         return mean, torch.diag_embed(std), z
 
 
@@ -488,7 +487,6 @@ class tDLGM(nn.Module):
 
         # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
 
-
         # TODO THIS ONLY SUPPORTS ONE STEP PREDICTION, NEED TO FIX FOR MULTI-STEP
         if y.ndim >= 3 and y.size(1) != 1:
             raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
@@ -521,7 +519,6 @@ class tDLGM(nn.Module):
             target_state,
         )
         return reconstruction + kl + 0.01 * consistency
-
 
     def train_step(
         self,
@@ -584,7 +581,6 @@ class tDLGM(nn.Module):
 
         t = self.model_t(x)
 
-
         t_1 = self.model_t(x_1)
 
         self.model_g.make_internal_state(x.size(0))
@@ -593,7 +589,7 @@ class tDLGM(nn.Module):
 
         mean, R, z = self.model_r(x_1)
 
-        #print(z)
+        # print(z)
 
         self.model_g.set_xi(z)
 
