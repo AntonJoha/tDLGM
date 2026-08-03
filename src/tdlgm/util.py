@@ -1,7 +1,7 @@
 from datetime import datetime
 from distutils.util import strtobool
 import numpy as np
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from pathlib import Path
 import pandas as pd
 import logging
@@ -24,8 +24,8 @@ class DataConfig:
     batch_size: int = 8
     horizon: int = 1
     shampoo_code: bool = False
-    reduced_dataset: float = None ## USE reduced dataset for quick testing
-    train_fraction: float = 0.8 ## TEST/TRAIN split fraction
+    reduced_dataset: float | None = None
+    train_fraction: float = 0.8
 
 
 
@@ -43,7 +43,6 @@ class BaselineConfig(DataConfig):
     epochs: int = 80
     seed: int = 42
     device: str | None = None
-    reduced_dataset: float = None
 
 
 @dataclass(slots=True)
@@ -229,7 +228,7 @@ class TimeSeriesDataset(Dataset):
         self.std = std
 
     def __len__(self):
-        return len(self.series) - self.context_length - self.horizon
+        return max(0, len(self.series) - self.context_length - self.horizon + 1)
 
     def __getitem__(self, idx):
         x = (self.series[idx : idx + self.context_length] - self.mean) / self.std
@@ -242,9 +241,9 @@ class TimeSeriesDataset(Dataset):
 
 
 def get_dataset(tsf_file_path, context_length, horizon, batch_size=32, train_test_split=0.8, reduced_dataset=None):
-    tsf_file_path = (
-        "data/pedestrian_counts_dataset.tsf"  # Replace with your .tsf file path
-    )
+    tsf_file_path = Path(tsf_file_path)
+    if not tsf_file_path.exists():
+        raise FileNotFoundError(tsf_file_path)
     df, _freq, _horizon, _has_missing, _equal_length = convert_tsf_to_dataframe(
         tsf_file_path
     )
@@ -258,7 +257,6 @@ def get_dataset(tsf_file_path, context_length, horizon, batch_size=32, train_tes
     mean = np.mean(all_values)
     std = np.std(all_values)
 
-    train_size = int(len(df) * train_test_split)
     dataset = None
     for row in df["series_value"]:
         if dataset is None:
@@ -275,16 +273,29 @@ def get_dataset(tsf_file_path, context_length, horizon, batch_size=32, train_tes
                 ]
             )
 
-    train_size = int(0.8 * len(dataset))
+    if len(dataset) < 2:
+        raise ValueError("dataset must contain at least two windows")
+
+    train_size = int(len(dataset) * train_test_split)
+    train_size = min(max(1, train_size), len(dataset) - 1)
     test_size = len(dataset) - train_size
 
-    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+    train_dataset, test_dataset = random_split(
+        dataset,
+        [train_size, test_size],
+    )
 
     if reduced_dataset is not None:
-        train_size = int(reduced_dataset * len(train_dataset))
-        test_size = int(reduced_dataset * len(test_dataset))
-        train_dataset, _ = random_split(train_dataset, [train_size, len(train_dataset) - train_size])
-        test_dataset, _ = random_split(test_dataset, [test_size, len(test_dataset) - test_size])
+        train_size = max(1, int(reduced_dataset * len(train_dataset)))
+        test_size = max(1, int(reduced_dataset * len(test_dataset)))
+        train_dataset, _ = random_split(
+            train_dataset,
+            [train_size, len(train_dataset) - train_size],
+        )
+        test_dataset, _ = random_split(
+            test_dataset,
+            [test_size, len(test_dataset) - test_size],
+        )
 
 
     train_df = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -298,7 +309,7 @@ def get_dataset(tsf_file_path, context_length, horizon, batch_size=32, train_tes
 
 
 class WindowedSeriesDataset(Dataset):
-    def __init__(self, series: torch.Tensor, seq_len: int, horizon: int = 10) -> None:
+    def __init__(self, series: torch.Tensor, seq_len: int, horizon: int = 1) -> None:
         if series.ndim != 1:
             raise ValueError("series must be 1D")
         if len(series) <= seq_len:
@@ -309,7 +320,7 @@ class WindowedSeriesDataset(Dataset):
         self.horizon = horizon
 
     def __len__(self) -> int:
-        return len(self.series) - self.seq_len - self.horizon
+        return max(0, len(self.series) - self.seq_len - self.horizon + 1)
 
     def __getitem__(self, index: int) -> torch.Tensor:
         sequence = self.series[index : index + self.seq_len]
@@ -339,14 +350,14 @@ def load_series(path: Path) -> torch.Tensor:
 
 def get_shampoo_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoader]:
     series = load_series(DATASET_PATH)
-    dataset = WindowedSeriesDataset(series, config.seq_len)
+    dataset = WindowedSeriesDataset(series, config.seq_len, config.horizon)
 
-    train_size = max(1, int(len(dataset) * config.train_fraction))
+    if len(dataset) < 2:
+        raise ValueError("shampoo dataset is too small for train/validation split")
+
+    train_size = int(len(dataset) * config.train_fraction)
+    train_size = min(max(1, train_size), len(dataset) - 1)
     val_size = len(dataset) - train_size
-
-    if val_size == 0:
-        train_size -= 1
-        val_size = 1
 
     generator = torch.Generator().manual_seed(config.seed)
     train_dataset, val_dataset = random_split(
@@ -374,16 +385,25 @@ def get_shampoo_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoade
 
 
 def make_dataloaders(config: DataConfig) -> tuple[DataLoader, DataLoader]:
-    
+    dataset_path = Path(get_dataset_names()[0])
 
-
-    if config.shampoo_code:
+    if config.shampoo_code or not dataset_path.exists():
+        if not dataset_path.exists() and not config.shampoo_code:
+            logger.warning(
+                "Dataset %s not found; falling back to the bundled shampoo data.",
+                dataset_path,
+            )
         return get_shampoo_dataloaders(config)
 
-    
-    return get_dataset(get_dataset_names()[0], config.seq_len, config.horizon, config.batch_size, train_test_split=config.train_fraction, reduced_dataset=config.reduced_dataset)
+    return get_dataset(
+        dataset_path,
+        config.seq_len,
+        config.horizon,
+        config.batch_size,
+        train_test_split=config.train_fraction,
+        reduced_dataset=config.reduced_dataset,
+    )
 
-   
 
 def get_dataset_names():
     return ["data/pedestrian_counts_dataset.tsf"]

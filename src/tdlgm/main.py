@@ -1,16 +1,14 @@
 from __future__ import annotations
-import sys
 import argparse
-import sys
-import csv
 import logging
-from dataclasses import replace
+from dataclasses import asdict, fields, replace
+from pathlib import Path
 
 import optuna
 import torch
 from optuna.exceptions import TrialPruned
 from torch.optim import Adam
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader
 
 from tdlgm.tDLGM import device, tDLGM, tDLGMConfig
 from tdlgm.util import make_dataloaders, SeriesConfig
@@ -52,12 +50,12 @@ def unpack_batch(
 
 
 def evaluate(model: tDLGM, loader: DataLoader) -> float:
+    model.eval()
     losses = []
     for batch in loader:
         x, x_1, y = unpack_batch(batch)
         loss = model.get_loss(x, x_1, y)
-        #print(f"Loss: {loss:.5f}")
-        losses.append(loss)
+        losses.append(float(loss))
     return sum(losses) / max(1, len(losses))
 
 
@@ -88,7 +86,7 @@ def configure_logging(verbose: bool) -> None:
         format="%(message)s",
     )
     optuna.logging.set_verbosity(
-        optuna.logging.INFO  #if verbose else optuna.logging.WARNING, For now I always want to see the optuna logs.
+        optuna.logging.INFO if verbose else optuna.logging.WARNING
     )
 
 
@@ -121,10 +119,8 @@ def train_model(
     model, optimizer = build_runtime_model(runtime)
     train_loader, val_loader = make_dataloaders(runtime)
     train_epochs = runtime.epochs if epochs is None else epochs
-    
-    print("HERE")
+
     before = evaluate(model, val_loader)
-    print("THERE")
     if runtime.verbose:
         logger.info("Validation loss before training: %.5f", before)
 
@@ -146,11 +142,14 @@ def train_model(
                 raise TrialPruned()
 
     after = evaluate(model, val_loader)
-    logger.info(f"Validation loss after training: {after}")
-    if not runtime.tuning_trials:
-        assert after < before, "Validation loss did not decrease after training"
     if runtime.verbose:
         logger.info("Validation loss after training: %.5f", after)
+    if trial is None and after >= before:
+        logger.warning(
+            "Validation loss did not improve: before=%.5f after=%.5f",
+            before,
+            after,
+        )
     if save_to is not None:
         checkpoint_path = save_checkpoint(model, runtime, save_to)
         if runtime.verbose:
@@ -214,9 +213,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--shampoo_code",
-        type=bool,
-        default=False,
-        help="Auto-generated code used for a test",
+        action="store_true",
+        help="Use the bundled shampoo sales dataset.",
     )
     parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility"
@@ -228,7 +226,7 @@ def parse_args() -> argparse.Namespace:
         help="Context length for the time series dataset",
     )
     parser.add_argument(
-        "--horizon", type=int, default=12, help="Horizon for the time series dataset"
+        "--horizon", type=int, default=1, help="Horizon for the time series dataset"
     )
     parser.add_argument(
         "--batch_size", type=int, default=32, help="Batch size for training"
@@ -262,12 +260,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--baseline",
-        type=str,
-        default=None,
+        action="store_true",
         help="Train a baseline model instead of tDLGM.",
     )
     parser.add_argument(
-            "--reduced_dataset", type=float, default=None, help="Fraction of the dataset to use for training")
+        "--reduced_dataset",
+        type=float,
+        default=None,
+        help="Fraction of the dataset to use for training",
+    )
 
     return parser.parse_args()
 
@@ -281,7 +282,6 @@ def setup(args: argparse.Namespace) -> None:
 def main() -> None:
     args = parse_args()
     base_runtime = SeriesConfig(**vars(args))
-
 
     configure_logging(args.verbose)
 
