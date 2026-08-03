@@ -490,10 +490,12 @@ class tDLGM(nn.Module):
 
 
         # TODO THIS ONLY SUPPORTS ONE STEP PREDICTION, NEED TO FIX FOR MULTI-STEP
+        if y.ndim >= 3 and y.size(1) != 1:
+            raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
+
         if pred_mean.ndim == 2:
             pred_mean = pred_mean.unsqueeze(1)
             y = y[:, 0, :]
-
         y_flat = y.reshape_as(pred_mean)
         reconstruction = (
             0.5
