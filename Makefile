@@ -1,4 +1,4 @@
-.PHONY: main tDLGM util lint shampoo
+.PHONY: main tDLGM util eval lint shampoo
 
 _: main tDLGM util shampoo 
 
@@ -17,6 +17,9 @@ tDLGM:
 
 util:
 	python -m tdlgm.util --verbose 
+
+eval:
+	python -m tdlgm.eval --verbose 
 
 lint:
 	./lint.sh
