@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 
 import csv
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 import logging
 from dataclasses import replace
 from pathlib import Path
@@ -37,6 +37,7 @@ class SeriesConfig:
     shampoo_code: bool = False
     verbose: bool = False
     horizon: int = 10
+    artifact_dir: str = "artifacts/tdlgm"
 
 
 def tdlgm_config(args) -> SeriesConfig:
@@ -132,6 +133,19 @@ def evaluate(model: tDLGM, loader: DataLoader) -> float:
     return sum(losses) / max(1, len(losses))
 
 
+def save_checkpoint(model: tDLGM, runtime: SeriesConfig, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = output_dir / "checkpoint.pt"
+    torch.save(
+        {
+            "config": asdict(runtime),
+            "model_state_dict": model.state_dict(),
+        },
+        checkpoint_path,
+    )
+    return checkpoint_path
+
+
 def configure_logging(verbose: bool) -> None:
     logging.basicConfig(
         level=logging.INFO if verbose else logging.WARNING,
@@ -164,6 +178,7 @@ def train_model(
     runtime: SeriesConfig,
     epochs: int | None = None,
     trial: optuna.Trial | None = None,
+    save_to: Path | None = None,
 ) -> tuple[float, float]:
     torch.manual_seed(runtime.seed)
 
@@ -198,6 +213,10 @@ def train_model(
         assert after < before, "Validation loss did not decrease after training"
     if runtime.verbose:
         logger.info("Validation loss after training: %.5f", after)
+    if save_to is not None:
+        checkpoint_path = save_checkpoint(model, runtime, save_to)
+        if runtime.verbose:
+            logger.info("Saved checkpoint to %s", checkpoint_path)
     return before, after
 
 
@@ -250,7 +269,7 @@ def train(base_runtime) -> None:
     )
     if base_runtime.verbose and not base_runtime.tune:
         logger.info("Skipping hyperparameter tuning.")
-    train_model(runtime)
+    train_model(runtime, save_to=Path(base_runtime.artifact_dir))
 
 
 def parse_args() -> argparse.Namespace:
@@ -305,6 +324,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose logging output"
     )
+    parser.add_argument(
+        "--artifact_dir",
+        type=str,
+        default="artifacts/tdlgm",
+        help="Directory where the trained checkpoint will be saved",
+    )
 
     return parser.parse_args()
 
@@ -316,11 +341,11 @@ def setup(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-
     args = parse_args()
     base_runtime = SeriesConfig(**vars(args))
 
     configure_logging(args.verbose)
+    setup(args)
     train(base_runtime)
 
 
