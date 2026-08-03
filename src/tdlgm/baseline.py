@@ -1,16 +1,13 @@
-from dataclasses import dataclass, fields, replace
-from itertools import chain
-
-import argparse
+from dataclasses import fields, replace
+import logging
 
 import optuna
 from optuna.exceptions import TrialPruned
 import torch
 from torch import nn
-from tdlgm.util import make_dataloaders, BaselineConfig, DataLoader, SeriesConfig
-import logging
+from torch.utils.data import DataLoader
 
-logger = logging.getLogger(__name__)
+from tdlgm.util import BaselineConfig, SeriesConfig, make_dataloaders
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
