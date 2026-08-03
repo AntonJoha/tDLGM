@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import argparse
+
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 import torch
@@ -9,20 +11,28 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset, random_split
 
 from tdlgm.tDLGM import device, tDLGM, tDLGMConfig
+from tdlgm.util import get_dataset_names, get_dataset
+
 
 DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
 
 
 @dataclass(slots=True)
 class SeriesConfig:
-    seq_len: int = 12
-    batch_size: int = 8
-    epochs: int = 80
-    hidden_size: int = 32
-    latent_dim: int = 8
-    learning_rate: float = 1e-3
-    train_fraction: float = 0.8
+    seq_len: int = None
+    batch_size: int = None
+    epochs: int = None
+    hidden_size: int = None
+    latent_dim: int = None
+    learning_rate: float = None
+    train_fraction: float = None
 
+
+def tdlgm_config(args) -> SeriesConfig:
+    return SeriesConfig(**{
+    k: v
+    for k, v in vars(args).items()
+    if k in {f.name for f in fields(SeriesConfig)}})
 
 class WindowedSeriesDataset(Dataset):
     def __init__(self, series: torch.Tensor, seq_len: int):
@@ -107,10 +117,9 @@ def evaluate(model: tDLGM, loader: DataLoader) -> float:
     return sum(losses) / max(1, len(losses))
 
 
-def train() -> None:
-    torch.manual_seed(42)
+def train_shampoo(args) -> None:
 
-    runtime = SeriesConfig()
+    runtime = tdlgm_config(args)
     model_config = tDLGMConfig(
         input_dim=1,
         hidden_size=runtime.hidden_size,
@@ -142,10 +151,50 @@ def train() -> None:
 
     after = evaluate(model, val_loader)
     print(f"Validation loss after training: {after:.5f}")
+    assert after < before, "Validation loss did not decrease after training"
 
+
+def train(args) -> None:
+    dataset = get_dataset(get_dataset_names()[0], context_length=args.seq_len, horizon=args.horizon)
+
+    
+
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train a tDLGM model on a time series dataset.")
+    parser.add_argument("--shampoo_code", type=bool, default=False, help="Auto-generated code used for a test")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--seq_len", type=int, default=5, help="Context length for the time series dataset")
+    parser.add_argument("--horizon", type=int, default=10, help="Horizon for the time series dataset")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
+    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
+    parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate for the optimizer")
+    parser.add_argument("--hidden_size", type=int, default=32, help="Hidden size for the tDLGM model")
+    parser.add_argument("--latent_dim", type=int, default=8, help="Latent dimension for the tDLGM model")
+    parser.add_argument("--train_fraction", type=float, default=0.8, help="Fraction of the dataset to use for training")
+
+
+
+    return parser.parse_args()
+
+
+def setup(args: argparse.Namespace) -> None:
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
 
 def main() -> None:
-    train()
+
+    args = parse_args()
+
+    setup(args)
+
+    if args.shampoo_code:
+        train_shampoo(args)
+        return
+    
+    train(args)
 
 
 if __name__ == "__main__":
