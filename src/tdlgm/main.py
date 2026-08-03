@@ -1,21 +1,18 @@
 from __future__ import annotations
 
 import argparse
-
 import csv
-from dataclasses import dataclass, fields
 import logging
-from dataclasses import replace
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 
 import optuna
-from optuna.exceptions import TrialPruned
 import torch
+from optuna.exceptions import TrialPruned
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset, random_split
 
 from tdlgm.tDLGM import device, tDLGM, tDLGMConfig
-
 
 DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
 logger = logging.getLogger(__name__)
@@ -37,6 +34,7 @@ class SeriesConfig:
     shampoo_code: bool = False
     verbose: bool = False
     horizon: int = 10
+    artifact_dir: str = "artifacts/tdlgm"
 
 
 def tdlgm_config(args) -> SeriesConfig:
@@ -132,6 +130,27 @@ def evaluate(model: tDLGM, loader: DataLoader) -> float:
     return sum(losses) / max(1, len(losses))
 
 
+def save_checkpoint(model: tDLGM, runtime: SeriesConfig, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = output_dir / "checkpoint.pt"
+    torch.save(
+        {
+            "config": asdict(runtime),
+            "model_config": asdict(model.config),
+            "model_state_dict": model.state_dict(),
+        },
+        checkpoint_path,
+    )
+    return checkpoint_path
+
+
+def load_checkpoint(checkpoint_path: Path) -> tuple[SeriesConfig, tDLGMConfig]:
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    runtime = SeriesConfig(**checkpoint["config"])
+    model_config = tDLGMConfig(**checkpoint["model_config"])
+    return runtime, model_config
+
+
 def configure_logging(verbose: bool) -> None:
     logging.basicConfig(
         level=logging.INFO if verbose else logging.WARNING,
@@ -164,6 +183,7 @@ def train_model(
     runtime: SeriesConfig,
     epochs: int | None = None,
     trial: optuna.Trial | None = None,
+    save_to: Path | None = None,
 ) -> tuple[float, float]:
     torch.manual_seed(runtime.seed)
 
@@ -197,12 +217,16 @@ def train_model(
         assert after < before, "Validation loss did not decrease after training"
     if runtime.verbose:
         logger.info("Validation loss after training: %.5f", after)
+    if save_to is not None:
+        checkpoint_path = save_checkpoint(model, runtime, save_to)
+        if runtime.verbose:
+            logger.info("Saved checkpoint to %s", checkpoint_path)
     return before, after
 
 
 def tune_hyperparameters(
     base_runtime: SeriesConfig,
-   ) -> SeriesConfig:
+) -> SeriesConfig:
     def objective(trial: optuna.Trial) -> float:
         runtime = replace(
             base_runtime,
@@ -236,20 +260,18 @@ def tune_hyperparameters(
     return best_runtime
 
 
-def train(base_runtime) -> None:
+def train(base_runtime) -> Path:
     torch.manual_seed(base_runtime.seed)
     if base_runtime.verbose:
         logger.info(
             "Starting training with %s.", "tuning" if base_runtime.tune else "no tuning"
         )
-    runtime = (
-        tune_hyperparameters(base_runtime)
-        if base_runtime.tune
-        else base_runtime
-    )
+    runtime = tune_hyperparameters(base_runtime) if base_runtime.tune else base_runtime
     if base_runtime.verbose and not base_runtime.tune:
         logger.info("Skipping hyperparameter tuning.")
-    train_model(runtime)
+    artifact_dir = Path(base_runtime.artifact_dir)
+    train_model(runtime, save_to=artifact_dir)
+    return artifact_dir
 
 
 def parse_args() -> argparse.Namespace:
@@ -304,6 +326,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose logging output"
     )
+    parser.add_argument(
+        "--artifact_dir",
+        type=str,
+        default="artifacts/tdlgm",
+        help="Directory where the trained checkpoint will be saved",
+    )
 
     return parser.parse_args()
 
@@ -315,11 +343,11 @@ def setup(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-
     args = parse_args()
     base_runtime = SeriesConfig(**vars(args))
 
     configure_logging(args.verbose)
+    setup(args)
     train(base_runtime)
 
 
