@@ -1,6 +1,7 @@
 from __future__ import annotations
-
+import sys
 import argparse
+import sys
 import csv
 import json
 import logging
@@ -15,29 +16,11 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset, random_split
 
 from tdlgm.tDLGM import device, tDLGM, tDLGMConfig
+from tdlgm.util import make_dataloaders, SeriesConfig
 
-DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
+
 logger = logging.getLogger(__name__)
 
-
-@dataclass(slots=True)
-class SeriesConfig:
-    seq_len: int = 12
-    batch_size: int = 8
-    epochs: int = 80
-    tuning_trials: int = 200
-    tuning_epochs: int = 100
-    hidden_size: int = 32
-    latent_dim: int = 8
-    learning_rate: float = 1e-3
-    train_fraction: float = 0.8
-    seed: int = 42
-    tune: bool = False
-    shampoo_code: bool = False
-    verbose: bool = False
-    horizon: int = 10
-    artifact_dir: str = "artifacts/tdlgm"
-    checkpoint_interval: int = 10
 
 
 def tdlgm_config(args) -> SeriesConfig:
@@ -49,87 +32,35 @@ def tdlgm_config(args) -> SeriesConfig:
         }
     )
 
-
-class WindowedSeriesDataset(Dataset):
-    def __init__(self, series: torch.Tensor, seq_len: int):
-        if series.ndim != 1:
-            raise ValueError("series must be 1D")
-        if len(series) <= seq_len:
-            raise ValueError("series must be longer than seq_len")
-
-        self.series = series
-        self.seq_len = seq_len
-
-    def __len__(self) -> int:
-        return len(self.series) - self.seq_len
-
-    def __getitem__(self, index: int) -> torch.Tensor:
-        return self.series[index : index + self.seq_len + 1]
-
-
-def load_series(path: Path) -> torch.Tensor:
-    values = []
-
-    with path.open(newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            values.append(float(row["sales"]))
-
-    series = torch.tensor(values, dtype=torch.float32)
-    mean = series.mean()
-    std = series.std(unbiased=False).clamp_min(1e-6)
-    return (series - mean) / std
-
-
-def make_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoader]:
-    series = load_series(DATASET_PATH)
-    dataset = WindowedSeriesDataset(series, config.seq_len)
-
-    train_size = max(1, int(len(dataset) * config.train_fraction))
-    val_size = len(dataset) - train_size
-
-    if val_size == 0:
-        train_size -= 1
-        val_size = 1
-
-    generator = torch.Generator().manual_seed(config.seed)
-    train_dataset, val_dataset = random_split(
-        dataset,
-        [train_size, val_size],
-        generator=generator,
-    )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config.batch_size,
-        shuffle=True,
-        drop_last=False,
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config.batch_size,
-        shuffle=False,
-        drop_last=False,
-    )
-
-    return train_loader, val_loader
-
-
 def unpack_batch(
     batch: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    batch = batch.to(device)
-    x = batch[:, :-1].unsqueeze(-1)
-    x_1 = batch[:, 1:].unsqueeze(-1)
-    y = batch[:, -1:].unsqueeze(-1)
-    return x, x_1, y
+    #batch = batch.to(device)
+    x, y = batch[0], batch[1]
+    if x.ndim == 2:
+        x = x.unsqueeze(-1)
+    if y.ndim == 2:
+        y = y.unsqueeze(-1)
+
+    if y.size(1) != 1:
+        raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
+    x_1 = torch.cat(
+        [
+            x,
+            y,
+        ],
+        dim=1,
+    )[:, 1:(1+x.shape[1]), :]
+    return x.to(device), x_1.to(device), y.to(device)
 
 
 def evaluate(model: tDLGM, loader: DataLoader) -> float:
     losses = []
     for batch in loader:
         x, x_1, y = unpack_batch(batch)
-        losses.append(model.get_loss(x, x_1, y))
+        loss = model.get_loss(x, x_1, y)
+        #print(f"Loss: {loss:.5f}")
+        losses.append(loss)
     return sum(losses) / max(1, len(losses))
 
 
@@ -221,6 +152,7 @@ def train_model(
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
     before = evaluate(model, val_loader)
+    print("THERE")
     if runtime.verbose:
         logger.info("Validation loss before training: %.5f", before)
 
@@ -236,7 +168,7 @@ def train_model(
             x, x_1, y = unpack_batch(batch)
             epoch_losses.append(model.train_step(x, x_1, y, optimizer))
 
-        if runtime.verbose and ((epoch + 1) % 10 == 0 or epoch == 0):
+        if runtime.verbose:
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
             logger.info("Epoch %03d: %.5f", epoch + 1, mean_loss)
 
@@ -256,6 +188,7 @@ def train_model(
                 logger.info("Saved checkpoint to %s", checkpoint_path)
 
     after = evaluate(model, val_loader)
+    logger.info(f"Validation loss after training: {after}")
     if not runtime.tuning_trials:
         assert after < before, "Validation loss did not decrease after training"
     if runtime.verbose:
@@ -333,11 +266,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--seq_len",
         type=int,
-        default=5,
+        default=12,
         help="Context length for the time series dataset",
     )
     parser.add_argument(
-        "--horizon", type=int, default=10, help="Horizon for the time series dataset"
+        "--horizon", type=int, default=12, help="Horizon for the time series dataset"
     )
     parser.add_argument(
         "--batch_size", type=int, default=32, help="Batch size for training"
@@ -370,10 +303,10 @@ def parse_args() -> argparse.Namespace:
         "--verbose", action="store_true", help="Enable verbose logging output"
     )
     parser.add_argument(
-        "--artifact_dir",
+        "--baseline",
         type=str,
-        default="artifacts/tdlgm",
-        help="Directory where the trained checkpoint will be saved",
+        default=None,
+        help="Train a baseline model instead of tDLGM.",
     )
     parser.add_argument(
         "--checkpoint_interval",
@@ -395,8 +328,14 @@ def main() -> None:
     args = parse_args()
     base_runtime = SeriesConfig(**vars(args))
 
+
     configure_logging(args.verbose)
-    setup(args)
+
+    if args.baseline:
+        from tdlgm.baseline import baseline_train
+        baseline_train(args)
+        return
+
     train(base_runtime)
 
 

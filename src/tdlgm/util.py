@@ -1,10 +1,69 @@
 from datetime import datetime
 from distutils.util import strtobool
-
+import numpy as np
+from dataclasses import dataclass, fields
+from pathlib import Path
 import pandas as pd
+import logging
 
+import csv
 from torch.utils.data import Dataset, DataLoader, ConcatDataset, random_split
 import torch
+
+
+logger = logging.getLogger(__name__)
+
+DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
+
+
+
+
+@dataclass(slots=True)
+class DataConfig:
+    seq_len: int = 12
+    batch_size: int = 8
+    horizon: int = 1
+    shampoo_code: bool = False
+    reduced_dataset: float = None ## USE reduced dataset for quick testing
+    train_fraction: float = 0.8 ## TEST/TRAIN split fraction
+
+
+
+
+@dataclass(slots=True)
+class BaselineConfig(DataConfig):
+    input_dim: int = 1
+    hidden_size: int = 20
+    latent_dim: int = 5
+    output_dim: int = 1
+    layers: int = 2
+
+    learning_rate: float = 1e-3
+
+    epochs: int = 80
+    seed: int = 42
+    device: str | None = None
+    reduced_dataset: float = None
+
+
+@dataclass(slots=True)
+class SeriesConfig(BaselineConfig):
+    # Architecture overrides
+    hidden_size: int = 32
+    latent_dim: int = 8
+
+    # Training overrides
+    batch_size: int = 64
+    learning_rate: float = 1e-3
+    # Training/tuning
+    tuning_trials: int = 20
+    tuning_epochs: int = 10
+    tune: bool = False
+
+    # Misc
+    verbose: bool = False
+    baseline: bool = False
+
 
 
 # Converts the contents in a .tsf file into a dataframe and returns it along with other meta-data of the dataset: frequency, horizon, whether the dataset contains missing values and whether the series have equal lengths
@@ -159,25 +218,30 @@ def convert_tsf_to_dataframe(
 
 
 class TimeSeriesDataset(Dataset):
-    def __init__(self, series, context_length, horizon):
+    def __init__(self, series, context_length, horizon, mean, std):
         self.series = torch.tensor(series, dtype=torch.float32)
         self.context_length = context_length
         self.horizon = horizon
+
+        #normalize the series
+        # Compute statistics from the dataset
+        self.mean = mean
+        self.std = std
 
     def __len__(self):
         return len(self.series) - self.context_length - self.horizon
 
     def __getitem__(self, idx):
-        x = self.series[idx : idx + self.context_length]
+        x = (self.series[idx : idx + self.context_length] - self.mean) / self.std
 
-        y = self.series[
+        y = (self.series[ 
             idx + self.context_length : idx + self.context_length + self.horizon
-        ]
+        ] - self.mean) / self.std
 
         return x, y
 
 
-def get_dataset(tsf_file_path, context_length, horizon, train_test_split=0.8):
+def get_dataset(tsf_file_path, context_length, horizon, batch_size=32, train_test_split=0.8, reduced_dataset=None):
     tsf_file_path = (
         "data/pedestrian_counts_dataset.tsf"  # Replace with your .tsf file path
     )
@@ -185,19 +249,28 @@ def get_dataset(tsf_file_path, context_length, horizon, train_test_split=0.8):
         tsf_file_path
     )
 
+
+    ## normalize data
+    all_values = []
+    for row in df["series_value"]:
+        all_values.extend(row)
+    all_values = np.array(all_values)
+    mean = np.mean(all_values)
+    std = np.std(all_values)
+
     train_size = int(len(df) * train_test_split)
     dataset = None
     for row in df["series_value"]:
         if dataset is None:
             dataset = TimeSeriesDataset(
-                row, context_length=context_length, horizon=horizon
+                row, context_length=context_length, horizon=horizon, mean=mean, std=std
             )
         else:
             dataset = ConcatDataset(
                 [
                     dataset,
                     TimeSeriesDataset(
-                        row, context_length=context_length, horizon=horizon
+                        row, context_length=context_length, horizon=horizon, mean=mean, std=std
                     ),
                 ]
             )
@@ -207,11 +280,110 @@ def get_dataset(tsf_file_path, context_length, horizon, train_test_split=0.8):
 
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
-    train_df = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    test_df = DataLoader(test_dataset, batch_size=32, shuffle=True)
+    if reduced_dataset is not None:
+        train_size = int(reduced_dataset * len(train_dataset))
+        test_size = int(reduced_dataset * len(test_dataset))
+        train_dataset, _ = random_split(train_dataset, [train_size, len(train_dataset) - train_size])
+        test_dataset, _ = random_split(test_dataset, [test_size, len(test_dataset) - test_size])
 
+
+    train_df = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_df = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    
+    logger.info(f"Train dataset size: {len(train_dataset)}")
+    logger.info(f"Test dataset size: {len(test_dataset)}")
     return train_df, test_df
 
+
+
+
+class WindowedSeriesDataset(Dataset):
+    def __init__(self, series: torch.Tensor, seq_len: int, horizon: int = 10) -> None:
+        if series.ndim != 1:
+            raise ValueError("series must be 1D")
+        if len(series) <= seq_len:
+            raise ValueError("series must be longer than seq_len")
+
+        self.series = series
+        self.seq_len = seq_len
+        self.horizon = horizon
+
+    def __len__(self) -> int:
+        return len(self.series) - self.seq_len - self.horizon
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        sequence = self.series[index : index + self.seq_len]
+        target = self.series[index + self.seq_len: index + self.seq_len + self.horizon]
+        return sequence, target
+
+
+
+
+
+def load_series(path: Path) -> torch.Tensor:
+    values = []
+
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            values.append(float(row["sales"]))
+
+    series = torch.tensor(values, dtype=torch.float32)
+    mean = series.mean()
+    std = series.std(unbiased=False).clamp_min(1e-6)
+    return (series - mean) / std
+
+
+
+
+
+def get_shampoo_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoader]:
+    series = load_series(DATASET_PATH)
+    dataset = WindowedSeriesDataset(series, config.seq_len)
+
+    train_size = max(1, int(len(dataset) * config.train_fraction))
+    val_size = len(dataset) - train_size
+
+    if val_size == 0:
+        train_size -= 1
+        val_size = 1
+
+    generator = torch.Generator().manual_seed(config.seed)
+    train_dataset, val_dataset = random_split(
+        dataset,
+        [train_size, val_size],
+        generator=generator,
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config.batch_size,
+        shuffle=True,
+        drop_last=False,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config.batch_size,
+        shuffle=False,
+        drop_last=False,
+    )
+
+    return train_loader, val_loader
+
+
+
+
+def make_dataloaders(config: DataConfig) -> tuple[DataLoader, DataLoader]:
+    
+
+
+    if config.shampoo_code:
+        return get_shampoo_dataloaders(config)
+
+    
+    return get_dataset(get_dataset_names()[0], config.seq_len, config.horizon, config.batch_size, train_test_split=config.train_fraction, reduced_dataset=config.reduced_dataset)
+
+   
 
 def get_dataset_names():
     return ["data/pedestrian_counts_dataset.tsf"]
