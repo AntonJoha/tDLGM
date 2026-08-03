@@ -365,6 +365,20 @@ def get_shampoo_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoade
         generator=generator,
     )
 
+    if config.reduced_dataset is not None:
+        train_size = max(1, int(config.reduced_dataset * len(train_dataset)))
+        val_size = max(1, int(config.reduced_dataset * len(val_dataset)))
+        train_dataset, _ = random_split(
+            train_dataset,
+            [train_size, len(train_dataset) - train_size],
+            generator=generator,
+        )
+        val_dataset, _ = random_split(
+            val_dataset,
+            [val_size, len(val_dataset) - val_size],
+            generator=generator,
+        )
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
@@ -407,21 +421,15 @@ def get_dataset_names():
 
 
 def main():
-    # Example usage of the convert_tsf_to_dataframe function
-    tsf_file_path = (
-        "data/pedestrian_counts_dataset.tsf"  # Replace with your .tsf file path
-    )
-
-    train_df, test_df = get_dataset(tsf_file_path, context_length=5, horizon=10)
+    config = SeriesConfig(seq_len=5, horizon=1, batch_size=8, shampoo_code=True)
+    train_df, test_df = make_dataloaders(config)
 
     for batch in train_df:
         x, y = batch
-        print("**** Validating that the training dataset is working as expected ****")
         print(f"Input shape: {x.shape}, Target shape: {y.shape}")
         break
     for batch in test_df:
         x, y = batch
-        print("**** Validating that the test dataset is working as expected ****")
         print(f"Input shape: {x.shape}, Target shape: {y.shape}")
         break
 
