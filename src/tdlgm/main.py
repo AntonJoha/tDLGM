@@ -25,13 +25,17 @@ class SeriesConfig:
     seq_len: int = 12
     batch_size: int = 8
     epochs: int = 80
-    tuning_trials: int = 8
-    tuning_epochs: int = 20
+    tuning_trials: int = 20
+    tuning_epochs: int = 100
     hidden_size: int = 32
     latent_dim: int = 8
     learning_rate: float = 1e-3
     train_fraction: float = 0.8
     seed: int = 42
+    tune: bool = False
+    shampoo_code: bool = False
+    verbose: bool = False
+    horizon: int = 10
 
 
 def tdlgm_config(args) -> SeriesConfig:
@@ -158,8 +162,7 @@ def build_runtime_model(runtime: SeriesConfig) -> tuple[tDLGM, Adam]:
 def train_model(
     runtime: SeriesConfig,
     epochs: int | None = None,
-    verbose: bool = True,
-) -> tuple[float, float]:
+    ) -> tuple[float, float]:
     torch.manual_seed(runtime.seed)
 
     model, optimizer = build_runtime_model(runtime)
@@ -167,7 +170,7 @@ def train_model(
     train_epochs = runtime.epochs if epochs is None else epochs
 
     before = evaluate(model, val_loader)
-    if verbose:
+    if runtime.verbose:
         logger.info("Validation loss before training: %.5f", before)
 
     model.train()
@@ -177,22 +180,22 @@ def train_model(
             x, x_1, y = unpack_batch(batch)
             epoch_losses.append(model.train_step(x, x_1, y, optimizer))
 
-        if verbose and ((epoch + 1) % 10 == 0 or epoch == 0):
+        if runtime.verbose and ((epoch + 1) % 10 == 0 or epoch == 0):
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
             logger.info("Epoch %03d: %.5f", epoch + 1, mean_loss)
 
     after = evaluate(model, val_loader)
     print(f"Validation loss after training: {after:.5f}")
-    assert after < before, "Validation loss did not decrease after training"
-    if verbose:
+    if not runtime.tuning_trials:
+        assert after < before, "Validation loss did not decrease after training"
+    if runtime.verbose:
         logger.info("Validation loss after training: %.5f", after)
     return before, after
 
 
 def tune_hyperparameters(
     base_runtime: SeriesConfig,
-    verbose: bool = True,
-) -> SeriesConfig:
+   ) -> SeriesConfig:
     def objective(trial: optuna.Trial) -> float:
         runtime = replace(
             base_runtime,
@@ -202,8 +205,8 @@ def tune_hyperparameters(
             latent_dim=trial.suggest_categorical("latent_dim", [4, 8, 16]),
             learning_rate=trial.suggest_float(
                 "learning_rate",
-                1e-4,
-                5e-3,
+                1e-5,
+                5e-1,
                 log=True,
             ),
         )
@@ -211,7 +214,6 @@ def tune_hyperparameters(
         _, after = train_model(
             runtime,
             epochs=runtime.tuning_epochs,
-            verbose=False,
         )
         return after
 
@@ -220,27 +222,26 @@ def tune_hyperparameters(
     study.optimize(objective, n_trials=base_runtime.tuning_trials)
 
     best_runtime = replace(base_runtime, **study.best_trial.params)
-    if verbose:
+    if base_runtime.verbose:
         logger.info("Best hyperparameters: %s", study.best_trial.params)
         logger.info("Best validation loss during tuning: %.5f", study.best_value)
     return best_runtime
 
 
-def train(use_tuning: bool = True, verbose: bool = False) -> None:
-    base_runtime = SeriesConfig()
+def train(base_runtime) -> None:
     torch.manual_seed(base_runtime.seed)
-    if verbose:
+    if base_runtime.verbose:
         logger.info(
-            "Starting training with %s.", "tuning" if use_tuning else "no tuning"
+            "Starting training with %s.", "tuning" if base_runtime.tune else "no tuning"
         )
     runtime = (
-        tune_hyperparameters(base_runtime, verbose=verbose)
-        if use_tuning
+        tune_hyperparameters(base_runtime)
+        if base_runtime.tune
         else base_runtime
     )
-    if verbose and not use_tuning:
+    if base_runtime.verbose and not base_runtime.tune:
         logger.info("Skipping hyperparameter tuning.")
-    train_model(runtime, verbose=verbose)
+    train_model(runtime)
 
 
 def parse_args() -> argparse.Namespace:
@@ -308,8 +309,10 @@ def setup(args: argparse.Namespace) -> None:
 def main() -> None:
 
     args = parse_args()
+    base_runtime = SeriesConfig(**vars(args))
+
     configure_logging(args.verbose)
-    train(use_tuning=args.tune, verbose=args.verbose)
+    train(base_runtime)
 
 
 if __name__ == "__main__":

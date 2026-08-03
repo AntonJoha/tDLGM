@@ -2,6 +2,10 @@
 
 _: main tDLGM util shampoo 
 
+
+tune:
+	python -m tdlgm.main --verbose --tune
+
 main:
 	python -m tdlgm.main --verbose 
 
