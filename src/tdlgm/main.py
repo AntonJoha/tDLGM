@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import argparse
 import logging
 from dataclasses import asdict, fields, replace
@@ -11,11 +12,9 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 
 from tdlgm.tDLGM import device, tDLGM, tDLGMConfig
-from tdlgm.util import make_dataloaders, SeriesConfig
-
+from tdlgm.util import SeriesConfig, make_dataloaders
 
 logger = logging.getLogger(__name__)
-
 
 
 def tdlgm_config(args) -> SeriesConfig:
@@ -27,10 +26,11 @@ def tdlgm_config(args) -> SeriesConfig:
         }
     )
 
+
 def unpack_batch(
     batch: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    #batch = batch.to(device)
+    # batch = batch.to(device)
     x, y = batch[0], batch[1]
     if x.ndim == 2:
         x = x.unsqueeze(-1)
@@ -45,7 +45,7 @@ def unpack_batch(
             y,
         ],
         dim=1,
-    )[:, 1:(1+x.shape[1]), :]
+    )[:, 1 : (1 + x.shape[1]), :]
     return x.to(device), x_1.to(device), y.to(device)
 
 
@@ -165,7 +165,9 @@ def tune_hyperparameters(
             base_runtime,
             seq_len=trial.suggest_categorical("seq_len", [6, 8, 12, 16, 20]),
             batch_size=trial.suggest_categorical("batch_size", [4, 8, 16, 32, 64, 128]),
-            hidden_size=trial.suggest_categorical("hidden_size", [16, 32, 64, 128, 256, 512]),
+            hidden_size=trial.suggest_categorical(
+                "hidden_size", [16, 32, 64, 128, 256, 512]
+            ),
             latent_dim=trial.suggest_categorical("latent_dim", [4, 8, 16, 32, 64, 128]),
             learning_rate=trial.suggest_float(
                 "learning_rate",
@@ -183,7 +185,9 @@ def tune_hyperparameters(
         return after
 
     sampler = optuna.samplers.TPESampler(seed=base_runtime.seed)
-    study = optuna.create_study(direction="minimize", sampler=sampler, pruner=optuna.pruners.MedianPruner())
+    study = optuna.create_study(
+        direction="minimize", sampler=sampler, pruner=optuna.pruners.MedianPruner()
+    )
     study.optimize(objective, n_trials=base_runtime.tuning_trials)
 
     best_runtime = replace(base_runtime, **study.best_trial.params)
@@ -264,6 +268,12 @@ def parse_args() -> argparse.Namespace:
         help="Train a baseline model instead of tDLGM.",
     )
     parser.add_argument(
+        "--artifact_dir",
+        type=str,
+        default="artifacts/tdlgm",
+        help="Directory to save checkpoints.",
+    )
+    parser.add_argument(
         "--reduced_dataset",
         type=float,
         default=None,
@@ -287,6 +297,7 @@ def main() -> None:
 
     if args.baseline:
         from tdlgm.baseline import baseline_train
+
         baseline_train(args)
         return
 

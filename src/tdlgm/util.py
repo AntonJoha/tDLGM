@@ -1,21 +1,18 @@
-from datetime import datetime
-from distutils.util import strtobool
-import numpy as np
-from dataclasses import dataclass
-from pathlib import Path
-import pandas as pd
-import logging
-
 import csv
-from torch.utils.data import Dataset, DataLoader, ConcatDataset, random_split
-import torch
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from distutils.util import strtobool
+from pathlib import Path
 
+import numpy as np
+import pandas as pd
+import torch
+from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 
 logger = logging.getLogger(__name__)
 
 DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
-
-
 
 
 @dataclass(slots=True)
@@ -26,8 +23,7 @@ class DataConfig:
     shampoo_code: bool = False
     reduced_dataset: float | None = None
     train_fraction: float = 0.8
-
-
+    artifact_dir: str = "artifacts/tdlgm"
 
 
 @dataclass(slots=True)
@@ -62,7 +58,6 @@ class SeriesConfig(BaselineConfig):
     # Misc
     verbose: bool = False
     baseline: bool = False
-
 
 
 # Converts the contents in a .tsf file into a dataframe and returns it along with other meta-data of the dataset: frequency, horizon, whether the dataset contains missing values and whether the series have equal lengths
@@ -101,7 +96,7 @@ def convert_tsf_to_dataframe(
                             if (
                                 len(line_content) != 3
                             ):  # Attributes have both name and type
-                                raise Exception("Invalid meta-data specification.")
+                                raise ValueError("Invalid meta-data specification.")
 
                             col_names.append(line_content[1])
                             col_types.append(line_content[2])
@@ -109,7 +104,7 @@ def convert_tsf_to_dataframe(
                             if (
                                 len(line_content) != 2
                             ):  # Other meta-data have only values
-                                raise Exception("Invalid meta-data specification.")
+                                raise ValueError("Invalid meta-data specification.")
 
                             if line.startswith("@frequency"):
                                 frequency = line_content[1]
@@ -124,18 +119,18 @@ def convert_tsf_to_dataframe(
 
                     else:
                         if len(col_names) == 0:
-                            raise Exception(
+                            raise ValueError(
                                 "Missing attribute section. Attribute section must come before data."
                             )
 
                         found_data_tag = True
                 elif not line.startswith("#"):
                     if len(col_names) == 0:
-                        raise Exception(
+                        raise ValueError(
                             "Missing attribute section. Attribute section must come before data."
                         )
                     elif not found_data_tag:
-                        raise Exception("Missing @data tag.")
+                        raise ValueError("Missing @data tag.")
                     else:
                         if not started_reading_data_section:
                             started_reading_data_section = True
@@ -148,13 +143,13 @@ def convert_tsf_to_dataframe(
                         full_info = line.split(":")
 
                         if len(full_info) != (len(col_names) + 1):
-                            raise Exception("Missing attributes/values in series.")
+                            raise ValueError("Missing attributes/values in series.")
 
                         series = full_info[len(full_info) - 1]
                         series = series.split(",")
 
                         if len(series) == 0:
-                            raise Exception(
+                            raise ValueError(
                                 "A given series should contains a set of comma separated numeric values. At least one numeric value should be there in a series. Missing values should be indicated with ? symbol"
                             )
 
@@ -169,7 +164,7 @@ def convert_tsf_to_dataframe(
                         if numeric_series.count(replace_missing_vals_with) == len(
                             numeric_series
                         ):
-                            raise Exception(
+                            raise ValueError(
                                 "All series values are missing. A given series should contains a set of comma separated numeric values. At least one numeric value should be there in a series."
                             )
 
@@ -184,25 +179,25 @@ def convert_tsf_to_dataframe(
                             elif col_types[i] == "date":
                                 att_val = datetime.strptime(
                                     full_info[i], "%Y-%m-%d %H-%M-%S"
-                                )
+                                ).replace(tzinfo=timezone.utc)
                             else:
-                                raise Exception(
+                                raise ValueError(
                                     "Invalid attribute type."
                                 )  # Currently, the code supports only numeric, string and date types. Extend this as required.
 
                             if att_val is None:
-                                raise Exception("Invalid attribute value.")
+                                raise ValueError("Invalid attribute value.")
                             else:
                                 all_data[col_names[i]].append(att_val)
 
                 line_count = line_count + 1
 
         if line_count == 0:
-            raise Exception("Empty file.")
+            raise ValueError("Empty file.")
         if len(col_names) == 0:
-            raise Exception("Missing attribute section.")
+            raise ValueError("Missing attribute section.")
         if not found_data_section:
-            raise Exception("Missing series information under data section.")
+            raise ValueError("Missing series information under data section.")
 
         all_data[value_column_name] = all_series
         loaded_data = pd.DataFrame(all_data)
@@ -222,7 +217,7 @@ class TimeSeriesDataset(Dataset):
         self.context_length = context_length
         self.horizon = horizon
 
-        #normalize the series
+        # normalize the series
         # Compute statistics from the dataset
         self.mean = mean
         self.std = std
@@ -233,21 +228,30 @@ class TimeSeriesDataset(Dataset):
     def __getitem__(self, idx):
         x = (self.series[idx : idx + self.context_length] - self.mean) / self.std
 
-        y = (self.series[ 
-            idx + self.context_length : idx + self.context_length + self.horizon
-        ] - self.mean) / self.std
+        y = (
+            self.series[
+                idx + self.context_length : idx + self.context_length + self.horizon
+            ]
+            - self.mean
+        ) / self.std
 
         return x, y
 
 
-def get_dataset(tsf_file_path, context_length, horizon, batch_size=32, train_test_split=0.8, reduced_dataset=None):
+def get_dataset(
+    tsf_file_path,
+    context_length,
+    horizon,
+    batch_size=32,
+    train_test_split=0.8,
+    reduced_dataset=None,
+):
     tsf_file_path = Path(tsf_file_path)
     if not tsf_file_path.exists():
         raise FileNotFoundError(tsf_file_path)
     df, _freq, _horizon, _has_missing, _equal_length = convert_tsf_to_dataframe(
         tsf_file_path
     )
-
 
     ## normalize data
     all_values = []
@@ -268,7 +272,11 @@ def get_dataset(tsf_file_path, context_length, horizon, batch_size=32, train_tes
                 [
                     dataset,
                     TimeSeriesDataset(
-                        row, context_length=context_length, horizon=horizon, mean=mean, std=std
+                        row,
+                        context_length=context_length,
+                        horizon=horizon,
+                        mean=mean,
+                        std=std,
                     ),
                 ]
             )
@@ -297,15 +305,12 @@ def get_dataset(tsf_file_path, context_length, horizon, batch_size=32, train_tes
             [test_size, len(test_dataset) - test_size],
         )
 
-
     train_df = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_df = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
-    
+
     logger.info(f"Train dataset size: {len(train_dataset)}")
     logger.info(f"Test dataset size: {len(test_dataset)}")
     return train_df, test_df
-
-
 
 
 class WindowedSeriesDataset(Dataset):
@@ -324,11 +329,8 @@ class WindowedSeriesDataset(Dataset):
 
     def __getitem__(self, index: int) -> torch.Tensor:
         sequence = self.series[index : index + self.seq_len]
-        target = self.series[index + self.seq_len: index + self.seq_len + self.horizon]
+        target = self.series[index + self.seq_len : index + self.seq_len + self.horizon]
         return sequence, target
-
-
-
 
 
 def load_series(path: Path) -> torch.Tensor:
@@ -343,9 +345,6 @@ def load_series(path: Path) -> torch.Tensor:
     mean = series.mean()
     std = series.std(unbiased=False).clamp_min(1e-6)
     return (series - mean) / std
-
-
-
 
 
 def get_shampoo_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoader]:
@@ -380,8 +379,6 @@ def get_shampoo_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoade
     )
 
     return train_loader, val_loader
-
-
 
 
 def make_dataloaders(config: DataConfig) -> tuple[DataLoader, DataLoader]:
