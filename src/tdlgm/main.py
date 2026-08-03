@@ -26,7 +26,7 @@ class SeriesConfig:
     seq_len: int = 12
     batch_size: int = 8
     epochs: int = 80
-    tuning_trials: int = 20
+    tuning_trials: int = 200
     tuning_epochs: int = 100
     hidden_size: int = 32
     latent_dim: int = 8
@@ -138,7 +138,7 @@ def configure_logging(verbose: bool) -> None:
         format="%(message)s",
     )
     optuna.logging.set_verbosity(
-        optuna.logging.INFO if verbose else optuna.logging.WARNING,
+        optuna.logging.INFO  #if verbose else optuna.logging.WARNING, For now I always want to see the optuna logs.
     )
 
 
@@ -193,7 +193,6 @@ def train_model(
                 raise TrialPruned()
 
     after = evaluate(model, val_loader)
-    print(f"Validation loss after training: {after:.5f}")
     if not runtime.tuning_trials:
         assert after < before, "Validation loss did not decrease after training"
     if runtime.verbose:
@@ -207,10 +206,10 @@ def tune_hyperparameters(
     def objective(trial: optuna.Trial) -> float:
         runtime = replace(
             base_runtime,
-            seq_len=trial.suggest_categorical("seq_len", [6, 8, 12]),
-            batch_size=trial.suggest_categorical("batch_size", [4, 8, 16]),
-            hidden_size=trial.suggest_categorical("hidden_size", [16, 32, 64]),
-            latent_dim=trial.suggest_categorical("latent_dim", [4, 8, 16]),
+            seq_len=trial.suggest_categorical("seq_len", [6, 8, 12, 16, 20]),
+            batch_size=trial.suggest_categorical("batch_size", [4, 8, 16, 32, 64, 128]),
+            hidden_size=trial.suggest_categorical("hidden_size", [16, 32, 64, 128, 256, 512]),
+            latent_dim=trial.suggest_categorical("latent_dim", [4, 8, 16, 32, 64, 128]),
             learning_rate=trial.suggest_float(
                 "learning_rate",
                 1e-5,
@@ -227,13 +226,13 @@ def tune_hyperparameters(
         return after
 
     sampler = optuna.samplers.TPESampler(seed=base_runtime.seed)
-    study = optuna.create_study(direction="minimize", sampler=sampler)
+    study = optuna.create_study(direction="minimize", sampler=sampler, pruner=optuna.pruners.MedianPruner())
     study.optimize(objective, n_trials=base_runtime.tuning_trials)
 
     best_runtime = replace(base_runtime, **study.best_trial.params)
-    if base_runtime.verbose:
-        logger.info("Best hyperparameters: %s", study.best_trial.params)
-        logger.info("Best validation loss during tuning: %.5f", study.best_value)
+
+    logger.info("Best hyperparameters: %s", study.best_trial.params)
+    logger.info("Best validation loss during tuning: %.5f", study.best_value)
     return best_runtime
 
 

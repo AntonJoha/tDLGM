@@ -4,7 +4,7 @@ _: main tDLGM util shampoo
 
 
 tune:
-	python -m tdlgm.main --verbose --tune
+	python -m tdlgm.main --tune --verbose
 
 main:
 	python -m tdlgm.main --verbose 
