@@ -22,7 +22,7 @@ DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
 class DataConfig:
     seq_len: int = 12
     batch_size: int = 8
-    horizon: int = 20
+    horizon: int = 1
     shampoo_code: bool = False
     reduced_dataset: float = None ## USE reduced dataset for quick testing
     train_fraction: float = 0.8 ## TEST/TRAIN split fraction
@@ -30,21 +30,20 @@ class DataConfig:
 
 
 
-@dataclass
+@dataclass(slots=True)
 class BaselineConfig(DataConfig):
-    # Architecture
-    input_dim: int = 10
+    input_dim: int = 1
     hidden_size: int = 20
     latent_dim: int = 5
-    output_dim: int = 10
+    output_dim: int = 1
     layers: int = 2
 
-    # Training
     learning_rate: float = 1e-3
 
-    # Misc
+    epochs: int = 80
     seed: int = 42
     device: str | None = None
+    reduced_dataset: float = None
 
 
 @dataclass(slots=True)
@@ -57,9 +56,8 @@ class SeriesConfig(BaselineConfig):
     batch_size: int = 64
     learning_rate: float = 1e-3
     # Training/tuning
-    epochs: int = 80
     tuning_trials: int = 20
-    tuning_epochs: int = 100
+    tuning_epochs: int = 10
     tune: bool = False
 
     # Misc
@@ -308,12 +306,15 @@ class WindowedSeriesDataset(Dataset):
 
         self.series = series
         self.seq_len = seq_len
+        self.horizon = horizon
 
     def __len__(self) -> int:
-        return len(self.series) - self.seq_len
+        return len(self.series) - self.seq_len - self.horizon
 
     def __getitem__(self, index: int) -> torch.Tensor:
-        return self.series[index : index + self.seq_len + 1]
+        sequence = self.series[index : index + self.seq_len]
+        target = self.series[index + self.seq_len: index + self.seq_len + self.horizon]
+        return sequence, target
 
 
 

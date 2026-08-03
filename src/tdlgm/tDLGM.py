@@ -39,7 +39,7 @@ class TimeLayer(nn.Module):
 
     def __init__(
         self,
-        input_dim=1,
+        input_dim=10,
         hidden_size=1,
         device=None,
     ):
