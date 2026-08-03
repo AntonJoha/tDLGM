@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tDLGM"
+version = "0.1.0"
+description = "Time Deep Latent Gaussian Model"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "optuna",
+    "matplotlib",
+    "numpy",
+    "torch==2.7.1",
+    "pandas",
+]
+
+[project.optional-dependencies]
+dev = [
+]
+
+[project.scripts]
+tdlgm = "tdlgm.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
