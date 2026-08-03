@@ -3,8 +3,11 @@ import sys
 import argparse
 import sys
 import csv
+import json
 import logging
-from dataclasses import replace
+from dataclasses import asdict, dataclass, fields, replace
+from datetime import datetime, timezone
+from pathlib import Path
 
 import optuna
 import torch
@@ -61,18 +64,42 @@ def evaluate(model: tDLGM, loader: DataLoader) -> float:
     return sum(losses) / max(1, len(losses))
 
 
-def save_checkpoint(model: tDLGM, runtime: SeriesConfig, output_dir: Path) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_path = output_dir / "checkpoint.pt"
-    torch.save(
-        {
-            "config": asdict(runtime),
-            "model_config": asdict(model.config),
-            "model_state_dict": model.state_dict(),
-        },
-        checkpoint_path,
-    )
+def checkpoint_payload(model: tDLGM, runtime: SeriesConfig) -> dict[str, object]:
+    return {
+        "config": asdict(runtime),
+        "model_config": asdict(model.config),
+        "model_state_dict": model.state_dict(),
+    }
+
+
+def save_checkpoint(model: tDLGM, runtime: SeriesConfig, checkpoint_path: Path) -> Path:
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(checkpoint_payload(model, runtime), checkpoint_path)
     return checkpoint_path
+
+
+def save_config(
+    runtime: SeriesConfig, model: tDLGM, output_dir: Path, timestamp: str
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    config_path = output_dir / f"config_{timestamp}.json"
+    with config_path.open("w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "timestamp": timestamp,
+                "config": asdict(runtime),
+                "model_config": asdict(model.config),
+            },
+            handle,
+            indent=2,
+            sort_keys=True,
+        )
+        handle.write("\n")
+    return config_path
+
+
+def checkpoint_filename(timestamp: str, epoch: int) -> str:
+    return f"checkpoint_{timestamp}_epoch{epoch:04d}.pt"
 
 
 def load_checkpoint(checkpoint_path: Path) -> tuple[SeriesConfig, tDLGMConfig]:
@@ -88,7 +115,7 @@ def configure_logging(verbose: bool) -> None:
         format="%(message)s",
     )
     optuna.logging.set_verbosity(
-        optuna.logging.INFO  #if verbose else optuna.logging.WARNING, For now I always want to see the optuna logs.
+        optuna.logging.INFO  # if verbose else optuna.logging.WARNING, For now I always want to see the optuna logs.
     )
 
 
@@ -121,12 +148,18 @@ def train_model(
     model, optimizer = build_runtime_model(runtime)
     train_loader, val_loader = make_dataloaders(runtime)
     train_epochs = runtime.epochs if epochs is None else epochs
-    
-    print("HERE")
+    checkpoint_interval = max(1, runtime.checkpoint_interval)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
     before = evaluate(model, val_loader)
     print("THERE")
     if runtime.verbose:
         logger.info("Validation loss before training: %.5f", before)
+
+    if save_to is not None:
+        config_path = save_config(runtime, model, save_to, timestamp)
+        if runtime.verbose:
+            logger.info("Saved configuration to %s", config_path)
 
     model.train()
     for epoch in range(train_epochs):
@@ -145,16 +178,21 @@ def train_model(
             if trial.should_prune():
                 raise TrialPruned()
 
+        if save_to is not None and (
+            (epoch + 1) % checkpoint_interval == 0 or epoch + 1 == train_epochs
+        ):
+            checkpoint_path = save_to / checkpoint_filename(timestamp, epoch + 1)
+            save_checkpoint(model, runtime, checkpoint_path)
+            save_checkpoint(model, runtime, save_to / "checkpoint.pt")
+            if runtime.verbose:
+                logger.info("Saved checkpoint to %s", checkpoint_path)
+
     after = evaluate(model, val_loader)
     logger.info(f"Validation loss after training: {after}")
     if not runtime.tuning_trials:
         assert after < before, "Validation loss did not decrease after training"
     if runtime.verbose:
         logger.info("Validation loss after training: %.5f", after)
-    if save_to is not None:
-        checkpoint_path = save_checkpoint(model, runtime, save_to)
-        if runtime.verbose:
-            logger.info("Saved checkpoint to %s", checkpoint_path)
     return before, after
 
 
@@ -166,7 +204,9 @@ def tune_hyperparameters(
             base_runtime,
             seq_len=trial.suggest_categorical("seq_len", [6, 8, 12, 16, 20]),
             batch_size=trial.suggest_categorical("batch_size", [4, 8, 16, 32, 64, 128]),
-            hidden_size=trial.suggest_categorical("hidden_size", [16, 32, 64, 128, 256, 512]),
+            hidden_size=trial.suggest_categorical(
+                "hidden_size", [16, 32, 64, 128, 256, 512]
+            ),
             latent_dim=trial.suggest_categorical("latent_dim", [4, 8, 16, 32, 64, 128]),
             learning_rate=trial.suggest_float(
                 "learning_rate",
@@ -184,7 +224,9 @@ def tune_hyperparameters(
         return after
 
     sampler = optuna.samplers.TPESampler(seed=base_runtime.seed)
-    study = optuna.create_study(direction="minimize", sampler=sampler, pruner=optuna.pruners.MedianPruner())
+    study = optuna.create_study(
+        direction="minimize", sampler=sampler, pruner=optuna.pruners.MedianPruner()
+    )
     study.optimize(objective, n_trials=base_runtime.tuning_trials)
 
     best_runtime = replace(base_runtime, **study.best_trial.params)
@@ -267,7 +309,11 @@ def parse_args() -> argparse.Namespace:
         help="Train a baseline model instead of tDLGM.",
     )
     parser.add_argument(
-            "--reduced_dataset", type=float, default=None, help="Fraction of the dataset to use for training")
+        "--checkpoint_interval",
+        type=int,
+        default=10,
+        help="Save a checkpoint every N epochs",
+    )
 
     return parser.parse_args()
 
