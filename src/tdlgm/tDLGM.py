@@ -228,7 +228,7 @@ class Generator(nn.Module):
         self.output_layer = nn.Sequential(
             nn.Linear(
                 config.hidden_size,
-                config.output_dim,
+                2 * config.output_dim,
                 device=device,
             )
         )
@@ -303,8 +303,12 @@ class Generator(nn.Module):
 
         output = self.output_layer(v[:, -1, :])
 
+        # Split into predicted mean and log-variance
+        pred_mean, pred_log_var = output.chunk(2, dim=-1)
+
         return (
-            output,
+            pred_mean,
+            pred_log_var,
             self.get_internal_state(),
         )
 
@@ -480,16 +484,19 @@ class tDLGM(nn.Module):
     def compute_loss(
         self,
         y,
-        prediction,
+        pred_mean,
+        pred_log_var,
         mean,
         R,
         generated_state,
         target_state,
     ):
 
-        reconstruction = self.mse(
-            prediction,
-            y.reshape_as(prediction),
+        # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
+        y_flat = y.reshape_as(pred_mean)
+        reconstruction = (
+            0.5
+            * (pred_log_var + (y_flat - pred_mean).pow(2) / pred_log_var.exp()).mean()
         )
 
         kl = 0.0
@@ -539,11 +546,12 @@ class tDLGM(nn.Module):
 
         self.model_g.set_xi(z)
 
-        prediction, state = self.model_g(x.size(0))
+        pred_mean, pred_log_var, state = self.model_g(x.size(0))
 
         loss = self.compute_loss(
             y,
-            prediction,
+            pred_mean,
+            pred_log_var,
             mean,
             R,
             state,
@@ -583,11 +591,12 @@ class tDLGM(nn.Module):
 
         self.model_g.set_xi(z)
 
-        prediction, state = self.model_g(x.size(0))
+        pred_mean, pred_log_var, state = self.model_g(x.size(0))
 
         return self.compute_loss(
             y,
-            prediction,
+            pred_mean,
+            pred_log_var,
             mean,
             R,
             state,

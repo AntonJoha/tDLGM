@@ -160,10 +160,7 @@ def convert_tsf_to_dataframe(
 
 class TimeSeriesDataset(Dataset):
     def __init__(self, series, context_length, horizon):
-        self.series = torch.tensor(
-            series,
-            dtype=torch.float32
-        )
+        self.series = torch.tensor(series, dtype=torch.float32)
         self.context_length = context_length
         self.horizon = horizon
 
@@ -171,37 +168,44 @@ class TimeSeriesDataset(Dataset):
         return len(self.series) - self.context_length - self.horizon
 
     def __getitem__(self, idx):
-        x = self.series[
-            idx : idx + self.context_length
-        ]
+        x = self.series[idx : idx + self.context_length]
 
         y = self.series[
-            idx + self.context_length :
-            idx + self.context_length + self.horizon
+            idx + self.context_length : idx + self.context_length + self.horizon
         ]
 
         return x, y
 
 
-
 def get_dataset(tsf_file_path, context_length, horizon, train_test_split=0.8):
-    tsf_file_path = "data/pedestrian_counts_dataset.tsf"  # Replace with your .tsf file path
-    df, _freq, _horizon, _has_missing, _equal_length = convert_tsf_to_dataframe(tsf_file_path)
-    
+    tsf_file_path = (
+        "data/pedestrian_counts_dataset.tsf"  # Replace with your .tsf file path
+    )
+    df, _freq, _horizon, _has_missing, _equal_length = convert_tsf_to_dataframe(
+        tsf_file_path
+    )
+
     train_size = int(len(df) * train_test_split)
     dataset = None
     for row in df["series_value"]:
         if dataset is None:
-            dataset = TimeSeriesDataset(row, context_length=context_length, horizon=horizon)
+            dataset = TimeSeriesDataset(
+                row, context_length=context_length, horizon=horizon
+            )
         else:
-            dataset = ConcatDataset([dataset, TimeSeriesDataset(row, context_length=context_length, horizon=horizon)])
-
+            dataset = ConcatDataset(
+                [
+                    dataset,
+                    TimeSeriesDataset(
+                        row, context_length=context_length, horizon=horizon
+                    ),
+                ]
+            )
 
     train_size = int(0.8 * len(dataset))
     test_size = len(dataset) - train_size
 
-    train_dataset, test_dataset = random_split(dataset,[train_size, test_size])
-       
+    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
     train_df = DataLoader(train_dataset, batch_size=32, shuffle=True)
     test_df = DataLoader(test_dataset, batch_size=32, shuffle=True)
@@ -209,18 +213,16 @@ def get_dataset(tsf_file_path, context_length, horizon, train_test_split=0.8):
     return train_df, test_df
 
 
-
-
 def get_dataset_names():
-    return [
-        "data/pedestrian_counts_dataset.tsf"
-    ]
+    return ["data/pedestrian_counts_dataset.tsf"]
 
 
 def main():
     # Example usage of the convert_tsf_to_dataframe function
-    tsf_file_path = "data/pedestrian_counts_dataset.tsf"  # Replace with your .tsf file path
-    
+    tsf_file_path = (
+        "data/pedestrian_counts_dataset.tsf"  # Replace with your .tsf file path
+    )
+
     train_df, test_df = get_dataset(tsf_file_path, context_length=5, horizon=10)
 
     for batch in train_df:
@@ -233,7 +235,6 @@ def main():
         print("**** Validating that the test dataset is working as expected ****")
         print(f"Input shape: {x.shape}, Target shape: {y.shape}")
         break
-    
 
 
 if __name__ == "__main__":

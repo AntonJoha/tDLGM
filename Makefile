@@ -3,16 +3,16 @@
 _: main tDLGM util shampoo 
 
 main:
-	python -m tdlgm.main
+	python -m tdlgm.main --verbose 
 
 shampoo:
-	python -m tdlgm.main --shampoo_code true
+	python -m tdlgm.main --shampoo_code true --verbose 
 
 tDLGM:
-	python -m tdlgm.tDLGM
+	python -m tdlgm.tDLGM --verbose 
 
 util:
-	python -m tdlgm.util
+	python -m tdlgm.util --verbose 
 
 lint:
 	./lint.sh
