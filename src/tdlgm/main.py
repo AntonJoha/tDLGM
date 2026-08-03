@@ -47,7 +47,7 @@ def unpack_batch(
         ],
         dim=1,
     )[:, 1:(1+x.shape[1]), :]
-    return x, x_1, y
+    return x.to(device), x_1.to(device), y.to(device)
 
 
 def evaluate(model: tDLGM, loader: DataLoader) -> float:
@@ -112,7 +112,7 @@ def train_model(
             x, x_1, y = unpack_batch(batch)
             epoch_losses.append(model.train_step(x, x_1, y, optimizer))
 
-        if runtime.verbose and ((epoch + 1) % 10 == 0 or epoch == 0):
+        if runtime.verbose:
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
             logger.info("Epoch %03d: %.5f", epoch + 1, mean_loss)
 
@@ -123,7 +123,7 @@ def train_model(
                 raise TrialPruned()
 
     after = evaluate(model, val_loader)
-    logger.log(f"Validation loss after training: {after:.5f}")
+    logger.info(f"Validation loss after training: {after}")
     if not runtime.tuning_trials:
         assert after < before, "Validation loss did not decrease after training"
     if runtime.verbose:
