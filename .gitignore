@@ -2,3 +2,8 @@ tags
 __pycache__
 *zip
 *tsf
+artifacts
+*egg-info
+
+.ipynb_checkpoints/*
+.venv/*
