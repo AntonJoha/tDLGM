@@ -147,7 +147,9 @@ def save_checkpoint(model: tDLGM, runtime: SeriesConfig, checkpoint_path: Path) 
     return checkpoint_path
 
 
-def save_config(runtime: SeriesConfig, model: tDLGM, output_dir: Path, timestamp: str) -> Path:
+def save_config(
+    runtime: SeriesConfig, model: tDLGM, output_dir: Path, timestamp: str
+) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     config_path = output_dir / f"config_{timestamp}.json"
     with config_path.open("w", encoding="utf-8") as handle:
@@ -182,7 +184,7 @@ def configure_logging(verbose: bool) -> None:
         format="%(message)s",
     )
     optuna.logging.set_verbosity(
-        optuna.logging.INFO  #if verbose else optuna.logging.WARNING, For now I always want to see the optuna logs.
+        optuna.logging.INFO  # if verbose else optuna.logging.WARNING, For now I always want to see the optuna logs.
     )
 
 
@@ -269,7 +271,9 @@ def tune_hyperparameters(
             base_runtime,
             seq_len=trial.suggest_categorical("seq_len", [6, 8, 12, 16, 20]),
             batch_size=trial.suggest_categorical("batch_size", [4, 8, 16, 32, 64, 128]),
-            hidden_size=trial.suggest_categorical("hidden_size", [16, 32, 64, 128, 256, 512]),
+            hidden_size=trial.suggest_categorical(
+                "hidden_size", [16, 32, 64, 128, 256, 512]
+            ),
             latent_dim=trial.suggest_categorical("latent_dim", [4, 8, 16, 32, 64, 128]),
             learning_rate=trial.suggest_float(
                 "learning_rate",
@@ -287,7 +291,9 @@ def tune_hyperparameters(
         return after
 
     sampler = optuna.samplers.TPESampler(seed=base_runtime.seed)
-    study = optuna.create_study(direction="minimize", sampler=sampler, pruner=optuna.pruners.MedianPruner())
+    study = optuna.create_study(
+        direction="minimize", sampler=sampler, pruner=optuna.pruners.MedianPruner()
+    )
     study.optimize(objective, n_trials=base_runtime.tuning_trials)
 
     best_runtime = replace(base_runtime, **study.best_trial.params)
