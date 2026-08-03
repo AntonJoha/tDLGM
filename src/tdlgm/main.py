@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import optuna
+from optuna.exceptions import TrialPruned
 import torch
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset, random_split
@@ -162,7 +163,8 @@ def build_runtime_model(runtime: SeriesConfig) -> tuple[tDLGM, Adam]:
 def train_model(
     runtime: SeriesConfig,
     epochs: int | None = None,
-    ) -> tuple[float, float]:
+    trial: optuna.Trial | None = None,
+) -> tuple[float, float]:
     torch.manual_seed(runtime.seed)
 
     model, optimizer = build_runtime_model(runtime)
@@ -183,6 +185,12 @@ def train_model(
         if runtime.verbose and ((epoch + 1) % 10 == 0 or epoch == 0):
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
             logger.info("Epoch %03d: %.5f", epoch + 1, mean_loss)
+
+        if trial is not None:
+            val_loss = evaluate(model, val_loader)
+            trial.report(val_loss, epoch)
+            if trial.should_prune():
+                raise TrialPruned()
 
     after = evaluate(model, val_loader)
     print(f"Validation loss after training: {after:.5f}")
@@ -214,6 +222,7 @@ def tune_hyperparameters(
         _, after = train_model(
             runtime,
             epochs=runtime.tuning_epochs,
+            trial=trial,
         )
         return after
 
