@@ -20,8 +20,6 @@ class tDLGMConfig:
     # Training
     learning_rate: float = 1e-3
     batch_size: int = 64
-    gradient_clip_norm: float = 5.0
-    consistency_weight: float = 0.01
 
     # Misc
     seed: int = 42
@@ -126,6 +124,7 @@ class GenLayer(nn.Module):
                 hidden_size,
                 device=device,
             ),
+            nn.Tanh(),
         )
 
     def get_internal_state(self):
@@ -305,6 +304,7 @@ class Generator(nn.Module):
 
         # Split into predicted mean and log-variance
         pred_mean, pred_log_var = output.chunk(2, dim=-1)
+        pred_log_var = pred_log_var.clamp(min=-100, max=100)
 
         return (
             pred_mean,
@@ -328,7 +328,7 @@ class RecLayer(nn.Module):
                 config.latent_dim,
                 device=config.device,
             ),
-            nn.ReLU(),
+            nn.Tanh(),
         )
 
         self.log_var = nn.Sequential(
@@ -339,24 +339,18 @@ class RecLayer(nn.Module):
             )
         )
 
-    def forward(
-        self,
-        x,
-    ):
-
+    def forward(self, x):
         mean = self.mean(x)
+        log_var = self.log_var(x).clamp(min=-100, max=100)
 
-        # diagonal covariance
-        std = torch.exp(0.5 * self.log_var(x))
+        std = torch.exp(0.5 * log_var)
 
         eps = torch.randn_like(std)
 
         z = mean + eps * std
 
-        # Store diagonal covariance matrix
-        R = torch.diag_embed(std)
-
-        return mean, R, z
+       
+        return mean, torch.diag_embed(std), z
 
 
 class Recognition(nn.Module):
@@ -493,6 +487,13 @@ class tDLGM(nn.Module):
     ):
 
         # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
+
+
+        # TODO THIS ONLY SUPPORTS ONE STEP PREDICTION, NEED TO FIX FOR MULTI-STEP
+        if pred_mean.ndim == 2:
+            pred_mean = pred_mean.unsqueeze(1)
+            y = y[:, 0, :]
+
         y_flat = y.reshape_as(pred_mean)
         reconstruction = (
             0.5
@@ -517,8 +518,8 @@ class tDLGM(nn.Module):
             generated_state,
             target_state,
         )
-
         return reconstruction + kl + 0.01 * consistency
+
 
     def train_step(
         self,
@@ -581,6 +582,7 @@ class tDLGM(nn.Module):
 
         t = self.model_t(x)
 
+
         t_1 = self.model_t(x_1)
 
         self.model_g.make_internal_state(x.size(0))
@@ -588,6 +590,8 @@ class tDLGM(nn.Module):
         self.model_g.set_internal_state(t)
 
         mean, R, z = self.model_r(x_1)
+
+        #print(z)
 
         self.model_g.set_xi(z)
 
