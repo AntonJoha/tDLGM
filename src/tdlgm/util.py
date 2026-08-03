@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from distutils.util import strtobool
 from pathlib import Path
 
+import time
+
 import numpy as np
 import pandas as pd
 import torch
@@ -24,6 +26,8 @@ class DataConfig:
     reduced_dataset: float | None = None
     train_fraction: float = 0.8
     artifact_dir: str = "artifacts/tdlgm"
+    checkpoint_interval: int = 10
+    run_id: str | None = time.strftime("%Y%m%d-%H%M%S", time.localtime())
 
 
 @dataclass(slots=True)

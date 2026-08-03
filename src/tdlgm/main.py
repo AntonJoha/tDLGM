@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import json
 import argparse
 import logging
 from dataclasses import asdict, fields, replace
@@ -69,15 +71,16 @@ def checkpoint_payload(model: tDLGM, runtime: SeriesConfig) -> dict[str, object]
 
 def save_checkpoint(model: tDLGM, runtime: SeriesConfig, checkpoint_path: Path) -> Path:
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(checkpoint_payload(model, runtime), checkpoint_path)
+    print("Saving checkpoint to: ", checkpoint_path)
+    torch.save(checkpoint_payload(model, runtime), str(checkpoint_path) + f"tdlmg_{runtime.run_id}.pt")
     return checkpoint_path
 
 
 def save_config(
-    runtime: SeriesConfig, model: tDLGM, output_dir: Path, timestamp: str
+    runtime: SeriesConfig, model: tDLGM, output_dir: Path, run_id: str
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    config_path = output_dir / f"config_{timestamp}.json"
+    config_path = output_dir / f"config_{run_id}_tdlgm.json"
     with config_path.open("w", encoding="utf-8") as handle:
         json.dump(
             {
@@ -93,8 +96,8 @@ def save_config(
     return config_path
 
 
-def checkpoint_filename(timestamp: str, epoch: int) -> str:
-    return f"checkpoint_{timestamp}_epoch{epoch:04d}.pt"
+def checkpoint_filename( epoch: int) -> str:
+    return f"checkpoint_epoch{epoch:04d}.pt"
 
 
 def load_checkpoint(checkpoint_path: Path) -> tuple[SeriesConfig, tDLGMConfig]:
@@ -175,9 +178,8 @@ def train_model(
         if save_to is not None and (
             (epoch + 1) % checkpoint_interval == 0 or epoch + 1 == train_epochs
         ):
-            checkpoint_path = save_to / checkpoint_filename(timestamp, epoch + 1)
+            checkpoint_path = save_to / checkpoint_filename( epoch + 1)
             save_checkpoint(model, runtime, checkpoint_path)
-            save_checkpoint(model, runtime, save_to / "checkpoint.pt")
             if runtime.verbose:
                 logger.info("Saved checkpoint to %s", checkpoint_path)
 
@@ -191,6 +193,7 @@ def train_model(
             after,
         )
     if save_to is not None:
+        print("Save to: ", save_to)
         checkpoint_path = save_checkpoint(model, runtime, save_to)
         if runtime.verbose:
             logger.info("Saved checkpoint to %s", checkpoint_path)
