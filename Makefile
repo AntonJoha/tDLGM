@@ -4,15 +4,15 @@ _: main tDLGM util shampoo baseline baseline_shampoo tune
 
 
 baseline:
-	python -m tdlgm.main --verbose --baseline --reduced_dataset 0.001
+	python -m tdlgm.main --verbose --baseline --reduced_dataset 0.001 --artifact_dir artifacts/baseline_tune
 	
 
 baseline_shampoo:
-	python -m tdlgm.main --verbose --baseline --shampoo_code
+	python -m tdlgm.main --verbose --baseline --shampoo_code --artifact_dir artifacts/baseline_tune
 	
 
 baseline_tune:
-	python -m tdlgm.main --verbose --baseline --tune --reduced_dataset 0.001
+	python -m tdlgm.main --verbose --baseline --tune --reduced_dataset 0.001 --artifact_dir artifacts/baseline_tune
 
 tune:
 	python -m tdlgm.main --verbose --tune --reduced_dataset 0.001

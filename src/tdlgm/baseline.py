@@ -1,13 +1,16 @@
 import logging
 from dataclasses import fields, replace
 
+from datetime import datetime, timezone
 import optuna
 import torch
 from optuna.exceptions import TrialPruned
 from torch import nn
 from torch.utils.data import DataLoader
+from pathlib import Path
 
-from tdlgm.util import BaselineConfig, SeriesConfig, make_dataloaders
+from tdlgm.util import BaselineConfig, SeriesConfig, make_dataloaders, save_checkpoint, save_config, checkpoint_filename
+
 
 logger = logging.getLogger(__name__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -81,6 +84,7 @@ def train_model(
     runtime: BaselineConfig,
     epochs: int | None = None,
     trial: optuna.Trial | None = None,
+    save_to: Path | None = None,
 ) -> tuple[float, float]:
     torch.manual_seed(runtime.seed)
 
@@ -88,10 +92,20 @@ def train_model(
     optimizer = torch.optim.Adam(model.parameters(), lr=runtime.learning_rate)
     train_loader, val_loader = make_dataloaders(runtime)
     train_epochs = runtime.epochs if epochs is None else epochs
+    checkpoint_interval = max(1, runtime.checkpoint_interval)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
     before = evaluate(model, val_loader)
     if runtime.verbose:
         logger.info("Validation loss before training: %.5f", before)
+
+
+    # Save the configuration to a JSON file in the save_to directory
+    if save_to is not None:
+        config_path = save_config(runtime, model, save_to, timestamp)
+        if runtime.verbose:
+            logger.info("Saved configuration to %s", config_path)
+
 
     model.train()
     for epoch in range(train_epochs):
@@ -109,6 +123,16 @@ def train_model(
             if trial.should_prune():
                 raise TrialPruned()
 
+        if save_to is not None and (
+            (epoch + 1) % checkpoint_interval == 0 or epoch + 1 == train_epochs
+        ):
+            checkpoint_path = save_to / checkpoint_filename( f"{(epoch + 1):04d}")
+            save_checkpoint(model, runtime, checkpoint_path)
+            if runtime.verbose:
+                logger.info("Saved checkpoint to %s", checkpoint_path)
+
+
+
     after = evaluate(model, val_loader)
     if runtime.verbose:
         logger.info("Validation loss after training: %.5f", after)
@@ -119,7 +143,17 @@ def train_model(
             before,
             after,
         )
+
+    # Save final checkpoint if save_to is specified
+    if save_to is not None:
+        print("Save to: ", save_to)
+        check = save_to / checkpoint_filename("final")
+        checkpoint_path = save_checkpoint(model, runtime, check)
+        if runtime.verbose:
+            logger.info("Saved checkpoint to %s", checkpoint_path)
     return before, after
+
+
 
 
 def tune_hyperparameters(
@@ -166,4 +200,5 @@ def baseline_train(args):
 
     runtime = tune_hyperparameters(baseline_config) if args.tune else baseline_config
 
-    train_model(runtime)
+    artifact_dir = Path(runtime.artifact_dir)
+    train_model(runtime, save_to=artifact_dir)

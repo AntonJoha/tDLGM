@@ -1,15 +1,17 @@
 import csv
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from distutils.util import strtobool
 from pathlib import Path
 
 import time
+import json
 
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 
 logger = logging.getLogger(__name__)
@@ -213,6 +215,57 @@ def convert_tsf_to_dataframe(
             contain_missing_values,
             contain_equal_length,
         )
+
+
+
+
+
+def checkpoint_payload(model: nn.Module, runtime: SeriesConfig) -> dict[str, object]:
+    return {
+        "config": asdict(runtime),
+        "model_config": asdict(model.config),
+        "model_state_dict": model.state_dict(),
+    }
+
+
+def save_checkpoint(model: nn.Module, runtime: SeriesConfig, checkpoint_path: Path) -> Path:
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    print("Saving checkpoint to: ", checkpoint_path)
+    torch.save(checkpoint_payload(model, runtime), str(checkpoint_path) + f"_{runtime.run_id}.pt")
+    return checkpoint_path
+
+
+def save_config(
+    runtime: SeriesConfig, model: nn.Module, output_dir: Path, run_id: str
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    config_path = output_dir / f"config_{runtime.run_id}.json"
+    with config_path.open("w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "run_id": run_id,
+                "config": asdict(runtime),
+                "model_config": asdict(model.config),
+            },
+            handle,
+            indent=2,
+            sort_keys=True,
+        )
+        handle.write("\n")
+    return config_path
+
+
+def checkpoint_filename( epoch) -> str:
+    return f"checkpoint_epoch{epoch}"
+
+
+def load_checkpoint(checkpoint_path: Path) -> tuple[SeriesConfig, SeriesConfig]:
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    runtime = SeriesConfig(**checkpoint["config"])
+    model_config = SeriesConfig(**checkpoint["model_config"])
+    return runtime, model_config
+
+
 
 
 class TimeSeriesDataset(Dataset):
