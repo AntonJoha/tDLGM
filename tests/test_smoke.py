@@ -1,6 +1,6 @@
 import torch
 
-from tdlgm.tDLGM import tDLGM, tDLGMConfig
+from tdlgm.tDLGM import device, tDLGM, tDLGMConfig
 from tdlgm.util import SeriesConfig, make_dataloaders
 
 
@@ -36,7 +36,7 @@ def test_generator_uses_temporal_latents_and_conditional_prior():
         layers=2,
     )
     model = tDLGM(config)
-    x = torch.randn(3, 4, 1)
+    x = torch.randn(3, 4, 1, device=device)
     state = model.model_t(x)
     mean, log_var, posterior_z = model.model_r(x)
 
