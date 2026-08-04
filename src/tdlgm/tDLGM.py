@@ -20,6 +20,11 @@ class tDLGMConfig:
     # Training
     learning_rate: float = 1e-3
     batch_size: int = 64
+    kl_anneal_steps: int = 1_000
+    free_bits: float = 0.0
+    posterior_sampling_start: float = 1.0
+    posterior_sampling_end: float = 0.1
+    sampling_anneal_steps: int = 1_000
 
     # Misc
     seed: int = 42
@@ -201,29 +206,21 @@ class Generator(nn.Module):
         super().__init__()
 
         self.layers = config.layers
-        self.seq_len = config.seq_len
         self.latent_dim = config.latent_dim
-
-        self.gen_layers = nn.ModuleList(
+        self.hidden_size = config.hidden_size
+        self.cells = nn.ModuleList(
             [
-                GenLayer(
+                nn.LSTMCell(
+                    config.latent_dim if i == 0 else config.hidden_size,
                     config.hidden_size,
-                    config.latent_dim,
-                    device,
+                    device=device,
                 )
                 for _ in range(config.layers)
             ]
         )
-
-        self.initial_transform = nn.Sequential(
-            nn.Linear(
-                config.latent_dim,
-                config.hidden_size,
-                device=device,
-            ),
-            nn.Tanh(),
+        self.prior = nn.Linear(
+            config.hidden_size, 2 * config.latent_dim, device=device
         )
-
         self.output_layer = nn.Sequential(
             nn.Linear(
                 config.hidden_size,
@@ -232,85 +229,57 @@ class Generator(nn.Module):
             )
         )
 
-        self.xi = None
-
-    def make_xi(
-        self,
-        batch_size,
-        device,
-    ):
-
-        self.xi = [
-            torch.randn(
-                batch_size,
-                self.seq_len,
-                self.latent_dim,
-                device=device,
-            )
-            for _ in range(self.layers + 1)
-        ]
-
-    def set_xi(
-        self,
-        xi,
-    ):
-
-        self.xi = xi
-
-    def make_internal_state(
-        self,
-        batch_size,
-    ):
-
-        for layer in self.gen_layers:
-            layer.make_internal_state(batch_size)
-
-    def set_internal_state(
-        self,
-        state,
-    ):
-
-        for layer, s in zip(
-            self.gen_layers,
-            state,
-            strict=False,
-        ):
-            layer.set_internal_state(s)
-
-    def get_internal_state(self):
-
-        return [layer.get_internal_state() for layer in self.gen_layers]
-
-    def forward(
-        self,
-        batch_size,
-    ):
-
-        if self.xi is None:
-            self.make_xi(
-                batch_size,
-                next(self.parameters()).device,
-            )
-
-        v = self.initial_transform(self.xi[0])
-
-        for i, layer in enumerate(self.gen_layers):
-            v = layer(
-                v,
-                self.xi[i + 1],
-            )
-
-        output = self.output_layer(v[:, -1, :])
-
-        # Split into predicted mean and log-variance
-        pred_mean, pred_log_var = output.chunk(2, dim=-1)
-        pred_log_var = pred_log_var.clamp(min=-100, max=100)
-
-        return (
-            pred_mean,
-            pred_log_var,
-            self.get_internal_state(),
+    def initial_state(self, batch_size):
+        zeros = torch.zeros(
+            batch_size, self.hidden_size, device=next(self.parameters()).device
         )
+        return [(zeros, zeros) for _ in self.cells]
+
+    def prior_parameters(self, state):
+        mean, log_var = self.prior(state[-1][0]).chunk(2, dim=-1)
+        return mean, log_var.clamp(min=-20, max=20)
+
+    def transition(self, z, state):
+        next_state = []
+        value = z
+        for cell, (h, c) in zip(self.cells, state, strict=True):
+            h, c = cell(value, (h, c))
+            next_state.append((h, c))
+            value = h
+        return next_state
+
+    def forward(self, z, state):
+        means, log_vars = [], []
+        for z_t in z.unbind(dim=1):
+            state = self.transition(z_t, state)
+            mean, log_var = self.output_layer(state[-1][0]).chunk(2, dim=-1)
+            means.append(mean)
+            log_vars.append(log_var.clamp(min=-20, max=20))
+        return torch.stack(means, dim=1), torch.stack(log_vars, dim=1), state
+
+    def sample_prior(self, state, seq_len):
+        samples, means, log_vars = [], [], []
+        for _ in range(seq_len):
+            mean, log_var = self.prior_parameters(state)
+            z = mean + torch.randn_like(mean) * torch.exp(0.5 * log_var)
+            samples.append(z)
+            means.append(mean)
+            log_vars.append(log_var)
+            state = self.transition(z, state)
+        return (
+            torch.stack(samples, dim=1),
+            torch.stack(means, dim=1),
+            torch.stack(log_vars, dim=1),
+        )
+
+    def prior_for_latents(self, state, z):
+        means, log_vars = [], []
+        for z_t in z.unbind(dim=1):
+            mean, log_var = self.prior_parameters(state)
+            means.append(mean)
+            log_vars.append(log_var)
+            state = self.transition(z_t, state)
+        return torch.stack(means, dim=1), torch.stack(log_vars, dim=1)
 
 
 # ── Recognition ───────────────────────────────────────────────────────────────
@@ -355,28 +324,23 @@ class RecLayer(nn.Module):
 class Recognition(nn.Module):
     def __init__(self, config):
         super().__init__()
-
-        self.rec_layers = nn.ModuleList(
-            [RecLayer(config) for _ in range(config.layers + 1)]
+        self.encoder = nn.LSTM(
+            config.input_dim,
+            config.hidden_size,
+            num_layers=config.layers,
+            batch_first=True,
+            device=device,
+        )
+        self.posterior = nn.Linear(
+            config.hidden_size, 2 * config.latent_dim, device=device
         )
 
-    def forward(
-        self,
-        x,
-    ):
-
-        means = []
-        Rs = []
-        zs = []
-
-        for layer in self.rec_layers:
-            mean, R, z = layer(x)
-
-            means.append(mean)
-            Rs.append(R)
-            zs.append(z)
-
-        return means, Rs, zs
+    def forward(self, x):
+        encoded, _ = self.encoder(x)
+        mean, log_var = self.posterior(encoded).chunk(2, dim=-1)
+        log_var = log_var.clamp(min=-20, max=20)
+        z = mean + torch.randn_like(mean) * torch.exp(0.5 * log_var)
+        return mean, log_var, z
 
 
 # ── tDLGM ─────────────────────────────────────────────────────────────────────
@@ -398,6 +362,7 @@ class tDLGM(nn.Module):
         self.model_r = Recognition(config)
 
         self.mse = nn.MSELoss()
+        self.register_buffer("training_steps", torch.zeros((), dtype=torch.long))
 
     def get_parameters(self):
 
@@ -412,39 +377,24 @@ class tDLGM(nn.Module):
     def gaussian_kl(
         self,
         mean,
-        R,
+        log_var,
+        prior_mean,
+        prior_log_var,
     ):
         """
-        KL(q(z)||N(0,I))
-
-        q(z)=N(mean, RR^T)
+        KL(q(z|x)||p(z|h)) for diagonal Gaussian posterior and prior.
 
         """
 
-        covariance = R @ R.transpose(
-            -1,
-            -2,
+        posterior_var = log_var.exp()
+        prior_var = prior_log_var.exp()
+        kl = 0.5 * (
+            prior_log_var
+            - log_var
+            + (posterior_var + (mean - prior_mean).pow(2)) / prior_var
+            - 1
         )
-
-        trace = torch.diagonal(
-            covariance,
-            dim1=-2,
-            dim2=-1,
-        ).sum(-1)
-
-        logdet = 2 * torch.log(
-            torch.diagonal(
-                R,
-                dim1=-2,
-                dim2=-1,
-            )
-        ).sum(-1)
-
-        latent_dim = mean.size(-1)
-
-        kl = 0.5 * (mean.pow(2).sum(-1) + trace - logdet - latent_dim)
-
-        return kl.mean()
+        return kl.clamp_min(self.config.free_bits).sum(dim=-1).mean()
 
     def state_loss(
         self,
@@ -476,49 +426,30 @@ class tDLGM(nn.Module):
 
     def compute_loss(
         self,
-        y,
+        target,
         pred_mean,
         pred_log_var,
         mean,
-        R,
-        generated_state,
-        target_state,
+        log_var,
+        prior_mean,
+        prior_log_var,
     ):
 
-        # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
-
-        # TODO THIS ONLY SUPPORTS ONE STEP PREDICTION, NEED TO FIX FOR MULTI-STEP
-        if y.ndim >= 3 and y.size(1) != 1:
-            raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
-
-        if pred_mean.ndim == 2:
-            pred_mean = pred_mean.unsqueeze(1)
-            y = y[:, 0, :]
-        y_flat = y.reshape_as(pred_mean)
+        target = target.reshape_as(pred_mean)
         reconstruction = (
             0.5
-            * (pred_log_var + (y_flat - pred_mean).pow(2) / pred_log_var.exp()).mean()
+            * (
+                pred_log_var
+                + (target - pred_mean).pow(2) / pred_log_var.exp()
+            ).mean()
         )
-
-        kl = 0.0
-
-        for m, r in zip(
-            mean,
-            R,
-            strict=False,
-        ):
-            kl += self.gaussian_kl(
-                m,
-                r,
-            )
-
-        kl /= len(mean)
-
-        consistency = self.state_loss(
-            generated_state,
-            target_state,
+        kl = self.gaussian_kl(
+            mean, log_var, prior_mean, prior_log_var
         )
-        return reconstruction + kl + 0.01 * consistency
+        beta = min(
+            1.0, self.training_steps.item() / max(1, self.config.kl_anneal_steps)
+        )
+        return reconstruction + beta * kl
 
     def train_step(
         self,
@@ -530,32 +461,36 @@ class tDLGM(nn.Module):
 
         optimizer.zero_grad()
 
-        # encode previous state
-
-        t = self.model_t(x)
-
-        t_1 = self.model_t(x_1)
-
-        self.model_g.make_internal_state(x.size(0))
-
-        self.model_g.set_internal_state(t)
-
-        # infer latent noise
-
-        mean, R, z = self.model_r(x_1)
-
-        self.model_g.set_xi(z)
-
-        pred_mean, pred_log_var, state = self.model_g(x.size(0))
+        state = self.model_t(x)
+        mean, log_var, posterior_z = self.model_r(x_1)
+        prior_z, _, _ = self.model_g.sample_prior(state, x_1.size(1))
+        progress = min(
+            1.0,
+            self.training_steps.item() / max(1, self.config.sampling_anneal_steps),
+        )
+        posterior_probability = (
+            self.config.posterior_sampling_start
+            + progress
+            * (
+                self.config.posterior_sampling_end
+                - self.config.posterior_sampling_start
+            )
+        )
+        use_posterior = torch.rand(
+            x.size(0), 1, 1, device=x.device
+        ) < posterior_probability
+        z = torch.where(use_posterior, posterior_z, prior_z)
+        prior_mean, prior_log_var = self.model_g.prior_for_latents(state, z)
+        pred_mean, pred_log_var, _ = self.model_g(z, state)
 
         loss = self.compute_loss(
-            y,
+            x_1,
             pred_mean,
             pred_log_var,
             mean,
-            R,
-            state,
-            t_1,
+            log_var,
+            prior_mean,
+            prior_log_var,
         )
 
         loss.backward()
@@ -566,6 +501,7 @@ class tDLGM(nn.Module):
         )
 
         optimizer.step()
+        self.training_steps += 1
 
         return loss.item()
 
@@ -579,30 +515,18 @@ class tDLGM(nn.Module):
 
         self.eval()
 
-        t = self.model_t(x)
-
-        t_1 = self.model_t(x_1)
-
-        self.model_g.make_internal_state(x.size(0))
-
-        self.model_g.set_internal_state(t)
-
-        mean, R, z = self.model_r(x_1)
-
-        # print(z)
-
-        self.model_g.set_xi(z)
-
-        pred_mean, pred_log_var, state = self.model_g(x.size(0))
+        state = self.model_t(x)
+        z, prior_mean, prior_log_var = self.model_g.sample_prior(state, x_1.size(1))
+        pred_mean, pred_log_var, _ = self.model_g(z, state)
 
         return self.compute_loss(
-            y,
+            x_1,
             pred_mean,
             pred_log_var,
-            mean,
-            R,
-            state,
-            t_1,
+            prior_mean,
+            prior_log_var,
+            prior_mean,
+            prior_log_var,
         ).item()
 
 
