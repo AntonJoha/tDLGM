@@ -398,6 +398,8 @@ class tDLGM(nn.Module):
         self.model_r = Recognition(config)
 
         self.mse = nn.MSELoss()
+        self.loss = nn.GaussianNLLLoss()
+        self.kl_multiplier = 0.01
 
     def get_parameters(self):
 
@@ -518,7 +520,11 @@ class tDLGM(nn.Module):
             generated_state,
             target_state,
         )
-        return reconstruction + kl + 0.01 * consistency
+        self.kl_multiplier *= 1.001
+        #print("rec:", reconstruction.item(), "kl:", kl.item())
+        return reconstruction + self.kl_multiplier* kl + 0.01 * consistency
+
+    
 
     def train_step(
         self,
@@ -569,6 +575,104 @@ class tDLGM(nn.Module):
 
         return loss.item()
 
+    def _compute_losses(
+        self,
+        y,
+        pred_mean,
+        pred_log_var,
+        mean,
+        R,
+        generated_state,
+        target_state,
+    ):
+
+        # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
+
+        # TODO THIS ONLY SUPPORTS ONE STEP PREDICTION, NEED TO FIX FOR MULTI-STEP
+        if y.ndim >= 3 and y.size(1) != 1:
+            raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
+
+        if pred_mean.ndim == 2:
+            pred_mean = pred_mean.unsqueeze(1)
+            y = y[:, 0, :]
+        y_flat = y.reshape_as(pred_mean)
+        reconstruction = (
+            0.5
+            * (pred_log_var + (y_flat - pred_mean).pow(2) / pred_log_var.exp()).mean()
+        )
+
+        kl = 0.0
+
+        for m, r in zip(
+            mean,
+            R,
+            strict=False,
+        ):
+            kl += self.gaussian_kl(
+                m,
+                r,
+            )
+
+        kl /= len(mean)
+
+        #print("rec:", reconstruction.item(), "kl:", kl.item())
+        return reconstruction, kl
+    
+
+    @torch.no_grad()
+    def compute_losses(self, x,x_1,y):
+
+        # encode previous state
+
+        t = self.model_t(x)
+
+        t_1 = self.model_t(x_1)
+
+        self.model_g.make_internal_state(x.size(0))
+
+        self.model_g.set_internal_state(t)
+
+        # infer latent noise
+
+        mean, R, z = self.model_r(x_1)
+
+        self.model_g.set_xi(z)
+
+        pred_mean, pred_log_var, state = self.model_g(x.size(0))
+
+        rec, kl = self._compute_losses(
+            y,
+            pred_mean,
+            pred_log_var,
+            mean,
+            R,
+            state,
+            t_1,
+        )
+
+
+        return rec.item(), kl.item()
+
+
+
+
+    def forward(self, x, x_1=None):
+
+        t = self.model_t(x)
+        self.model_g.make_internal_state(x.size(0))
+
+        self.model_g.set_internal_state(t)
+
+        if x_1 is not None:
+            _, _, z = self.model_r(x_1)
+            self.model_g.set_xi(z)
+        else:
+            self.model_g.set_xi(None)
+
+        pred_mean, pred_log_var, _ = self.model_g(x.size(0))
+
+        return pred_mean, pred_log_var
+
     @torch.no_grad()
     def get_loss(
         self,
@@ -587,7 +691,7 @@ class tDLGM(nn.Module):
 
         self.model_g.set_internal_state(t)
 
-        mean, R, z = self.model_r(x_1)
+        mean, R, z = self.model_r(x)
 
         # print(z)
 
@@ -604,6 +708,10 @@ class tDLGM(nn.Module):
             state,
             t_1,
         ).item()
+
+
+
+
 
 
 # ── Self Test ────────────────────────────────────────────────────────────────

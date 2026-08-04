@@ -197,6 +197,7 @@ def tune_hyperparameters(
 def baseline_train(args):
     torch.manual_seed(args.seed)
     baseline_config = SeriesConfig(**vars(args))
+    baseline_config.model_name = "baseline"
 
     runtime = tune_hyperparameters(baseline_config) if args.tune else baseline_config
 

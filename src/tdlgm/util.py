@@ -16,6 +16,21 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 
 logger = logging.getLogger(__name__)
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def configure_logging(verbose: bool) -> None:
+    logging.basicConfig(
+        level=logging.INFO if verbose else logging.WARNING,
+        format="%(message)s",
+    )
+    import optuna.logging
+    optuna.logging.set_verbosity(
+        optuna.logging.INFO  # if verbose else optuna.logging.WARNING, For now I always want to see the optuna logs.
+    )
+
+
+
+
 DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
 
 
@@ -30,6 +45,7 @@ class DataConfig:
     artifact_dir: str = "artifacts/tdlgm"
     checkpoint_interval: int = 10
     run_id: str | None = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    model_name: str = "tdlgm"
 
 
 @dataclass(slots=True)
@@ -259,11 +275,14 @@ def checkpoint_filename( epoch) -> str:
     return f"checkpoint_epoch{epoch}"
 
 
-def load_checkpoint(checkpoint_path: Path) -> tuple[SeriesConfig, SeriesConfig]:
+def load_checkpoint(checkpoint_path: Path) -> tuple[SeriesConfig, SeriesConfig, nn.Module]:
     checkpoint = torch.load(checkpoint_path, map_location=device)
     runtime = SeriesConfig(**checkpoint["config"])
     model_config = SeriesConfig(**checkpoint["model_config"])
-    return runtime, model_config
+    model = checkpoint["model_state_dict"]
+    return runtime, model_config, model
+
+
 
 
 

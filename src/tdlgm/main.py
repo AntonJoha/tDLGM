@@ -14,7 +14,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 
 from tdlgm.tDLGM import device, tDLGM, tDLGMConfig
-from tdlgm.util import SeriesConfig, make_dataloaders, save_checkpoint, save_config, checkpoint_filename
+from tdlgm.util import SeriesConfig, make_dataloaders, save_checkpoint, save_config, checkpoint_filename, configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -54,21 +54,14 @@ def unpack_batch(
 def evaluate(model: tDLGM, loader: DataLoader) -> float:
     model.eval()
     losses = []
+    print("HELLO")
     for batch in loader:
-        x, x_1, y = unpack_batch(batch)
-        loss = model.get_loss(x, x_1, y)
+        x, _, y = unpack_batch(batch)
+        pred, logvar = model(x)
+        loss = model.loss(pred, y, logvar.exp())
         losses.append(float(loss))
+    model.train()
     return sum(losses) / max(1, len(losses))
-
-def configure_logging(verbose: bool) -> None:
-    logging.basicConfig(
-        level=logging.INFO if verbose else logging.WARNING,
-        format="%(message)s",
-    )
-    optuna.logging.set_verbosity(
-        optuna.logging.INFO  # if verbose else optuna.logging.WARNING, For now I always want to see the optuna logs.
-    )
-
 
 def build_runtime_model(runtime: SeriesConfig) -> tuple[tDLGM, Adam]:
     model_config = tDLGMConfig(
@@ -115,13 +108,16 @@ def train_model(
     model.train()
     for epoch in range(train_epochs):
         epoch_losses = []
+        recon_loss, kl_loss = 0.0, 0.0
         for batch in train_loader:
             x, x_1, y = unpack_batch(batch)
             epoch_losses.append(model.train_step(x, x_1, y, optimizer))
+            recon_loss, kl_loss = model.compute_losses(x, x_1, y)
 
         if runtime.verbose:
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
-            logger.info("Epoch %03d: %.5f", epoch + 1, mean_loss)
+            recon_loss, kl_loss = recon_loss / len(train_loader), kl_loss / len(train_loader)
+            logger.info("Epoch %03d: %.5f: recon_loss %.5f: kl_loss %.5f:" + "Eval: " + str(evaluate(model, val_loader)), epoch + 1, mean_loss, recon_loss, kl_loss)
 
 
         # optuna trial reporting and pruning
@@ -239,7 +235,7 @@ def parse_args() -> argparse.Namespace:
         "--batch_size", type=int, default=32, help="Batch size for training"
     )
     parser.add_argument(
-        "--epochs", type=int, default=10, help="Number of training epochs"
+        "--epochs", type=int, default=100, help="Number of training epochs"
     )
     parser.add_argument(
         "--learning_rate",
