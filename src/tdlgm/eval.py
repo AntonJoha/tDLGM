@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-
+from dataclasses import asdict
 import torch
 
-from tdlgm.main import (
+from tdlgm.util import (
     configure_logging,
     evaluate,
     load_checkpoint,
     make_dataloaders,
 )
 from tdlgm.tDLGM import device, tDLGM
+from tdlgm.util import SeriesConfig, tDLGMConfig
+import json
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,6 +32,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+
+
+
+
+
 def evaluate_checkpoint(checkpoint_path: Path) -> float:
     runtime, model_config = load_checkpoint(checkpoint_path)
     checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -39,6 +46,10 @@ def evaluate_checkpoint(checkpoint_path: Path) -> float:
     loss = evaluate(model, val_loader)
     print(f"Validation loss: {loss:.5f}")
     return loss
+
+
+
+
 
 
 def main() -> None:

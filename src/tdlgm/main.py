@@ -14,7 +14,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 
 from tdlgm.tDLGM import device, tDLGM, tDLGMConfig
-from tdlgm.util import SeriesConfig, make_dataloaders
+from tdlgm.util import SeriesConfig, make_dataloaders, save_checkpoint, save_config, checkpoint_filename
 
 logger = logging.getLogger(__name__)
 
@@ -59,53 +59,6 @@ def evaluate(model: tDLGM, loader: DataLoader) -> float:
         loss = model.get_loss(x, x_1, y)
         losses.append(float(loss))
     return sum(losses) / max(1, len(losses))
-
-
-def checkpoint_payload(model: tDLGM, runtime: SeriesConfig) -> dict[str, object]:
-    return {
-        "config": asdict(runtime),
-        "model_config": asdict(model.config),
-        "model_state_dict": model.state_dict(),
-    }
-
-
-def save_checkpoint(model: tDLGM, runtime: SeriesConfig, checkpoint_path: Path) -> Path:
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    print("Saving checkpoint to: ", checkpoint_path)
-    torch.save(checkpoint_payload(model, runtime), str(checkpoint_path) + f"tdlmg_{runtime.run_id}.pt")
-    return checkpoint_path
-
-
-def save_config(
-    runtime: SeriesConfig, model: tDLGM, output_dir: Path, run_id: str
-) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    config_path = output_dir / f"config_{run_id}_tdlgm.json"
-    with config_path.open("w", encoding="utf-8") as handle:
-        json.dump(
-            {
-                "timestamp": timestamp,
-                "config": asdict(runtime),
-                "model_config": asdict(model.config),
-            },
-            handle,
-            indent=2,
-            sort_keys=True,
-        )
-        handle.write("\n")
-    return config_path
-
-
-def checkpoint_filename( epoch: int) -> str:
-    return f"checkpoint_epoch{epoch:04d}.pt"
-
-
-def load_checkpoint(checkpoint_path: Path) -> tuple[SeriesConfig, tDLGMConfig]:
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    runtime = SeriesConfig(**checkpoint["config"])
-    model_config = tDLGMConfig(**checkpoint["model_config"])
-    return runtime, model_config
-
 
 def configure_logging(verbose: bool) -> None:
     logging.basicConfig(
@@ -153,6 +106,7 @@ def train_model(
     if runtime.verbose:
         logger.info("Validation loss before training: %.5f", before)
 
+    # Save the configuration to a JSON file in the save_to directory
     if save_to is not None:
         config_path = save_config(runtime, model, save_to, timestamp)
         if runtime.verbose:
@@ -169,16 +123,19 @@ def train_model(
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
             logger.info("Epoch %03d: %.5f", epoch + 1, mean_loss)
 
+
+        # optuna trial reporting and pruning
         if trial is not None:
             val_loss = evaluate(model, val_loader)
             trial.report(val_loss, epoch)
             if trial.should_prune():
                 raise TrialPruned()
-
+        
+        # Save checkpoint if save_to is specified and it's time to save
         if save_to is not None and (
             (epoch + 1) % checkpoint_interval == 0 or epoch + 1 == train_epochs
         ):
-            checkpoint_path = save_to / checkpoint_filename( epoch + 1)
+            checkpoint_path = save_to / checkpoint_filename( f"{(epoch + 1):04d}")
             save_checkpoint(model, runtime, checkpoint_path)
             if runtime.verbose:
                 logger.info("Saved checkpoint to %s", checkpoint_path)
@@ -192,9 +149,12 @@ def train_model(
             before,
             after,
         )
+
+    # Save final checkpoint if save_to is specified
     if save_to is not None:
         print("Save to: ", save_to)
-        checkpoint_path = save_checkpoint(model, runtime, save_to)
+        check = save_to / checkpoint_filename("final")
+        checkpoint_path = save_checkpoint(model, runtime, check)
         if runtime.verbose:
             logger.info("Saved checkpoint to %s", checkpoint_path)
     return before, after
