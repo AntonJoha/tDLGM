@@ -1,5 +1,12 @@
 # tdlgm :)
 
+The model is a sequential VAE: a temporal recognition LSTM infers one Gaussian
+latent variable per time step, while the generator evolves its recurrent state
+from those latents. The generator also learns a conditional prior
+`p(z_t | h_t)`. Training anneals the conditional KL term and gradually replaces
+posterior samples with prior samples; evaluation and generation use only the
+conditional prior.
+
 Run the time-series example with tuning and logs:
 
 ```bash

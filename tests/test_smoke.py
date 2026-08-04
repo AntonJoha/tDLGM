@@ -1,3 +1,6 @@
+import torch
+
+from tdlgm.tDLGM import tDLGM, tDLGMConfig
 from tdlgm.util import SeriesConfig, make_dataloaders
 
 
@@ -22,3 +25,24 @@ def test_shampoo_dataloaders_return_batches():
     assert y_train.ndim == 2
     assert x_val.ndim == 2
     assert y_val.ndim == 2
+
+
+def test_generator_uses_temporal_latents_and_conditional_prior():
+    config = tDLGMConfig(
+        input_dim=1,
+        output_dim=1,
+        hidden_size=4,
+        latent_dim=2,
+        layers=2,
+    )
+    model = tDLGM(config)
+    x = torch.randn(3, 4, 1)
+    state = model.model_t(x)
+    mean, log_var, posterior_z = model.model_r(x)
+
+    prior_mean, prior_log_var = model.model_g.prior_for_latents(state, posterior_z)
+    prediction, prediction_log_var, _ = model.model_g(posterior_z, state)
+
+    assert mean.shape == log_var.shape == posterior_z.shape == (3, 4, 2)
+    assert prior_mean.shape == prior_log_var.shape == (3, 4, 2)
+    assert prediction.shape == prediction_log_var.shape == (3, 4, 1)
