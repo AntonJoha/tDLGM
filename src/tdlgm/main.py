@@ -39,8 +39,6 @@ def unpack_batch(
     if y.ndim == 2:
         y = y.unsqueeze(-1)
 
-    if y.size(1) != 1:
-        raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
     x_1 = torch.cat(
         [
             x,
