@@ -567,13 +567,13 @@ class TDLGM(nn.Module):
 
         # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
 
-        # TODO THIS ONLY SUPPORTS ONE STEP PREDICTION, NEED TO FIX FOR MULTI-STEP
-        if y.ndim >= 3 and y.size(1) != 1:
-            raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
-
         if pred_mean.ndim == 2:
             pred_mean = pred_mean.unsqueeze(1)
-            y = y[:, 0, :]
+        if y.ndim == 2:
+            y = y.unsqueeze(1)
+        if y.shape != pred_mean.shape:
+            pred_mean = pred_mean.expand_as(y)
+            pred_log_var = pred_log_var.expand_as(y)
         y_flat = y.reshape_as(pred_mean)
         reconstruction = (
             0.5
