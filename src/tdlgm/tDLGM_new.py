@@ -54,9 +54,11 @@ class TDLGM(nn.Module):
             nn.Linear(config.hidden_dim, config.hidden_dim),
         )
 
+        horizon = getattr(config, "horizon", 1)
+
         self.model_r = nn.Sequential(
             nn.Linear(
-                config.input_dim * (1 + config.seq_len) + config.hidden_dim,
+                config.input_dim * (config.seq_len + horizon) + config.hidden_dim,
                 config.hidden_dim,
             ),
             nn.ReLU(),
@@ -191,20 +193,20 @@ class TDLGM(nn.Module):
 
         return loss
 
+    def _match_target_shape(self, y, pred_mean):
+        if y.ndim == pred_mean.ndim + 1 and y.size(-1) == 1:
+            y = y.squeeze(-1)
+        if pred_mean.ndim == 3 and y.ndim == 2:
+            y = y.unsqueeze(-1)
+        return y.reshape_as(pred_mean)
+
     def compute_loss(
         self, y, pred_mean, pred_log_var, mean_q, logvar_q, mean_p, logvar_p
     ):
 
         # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
 
-        # TODO THIS ONLY SUPPORTS ONE STEP PREDICTION, NEED TO FIX FOR MULTI-STEP
-        if y.ndim >= 3 and y.size(1) != 1:
-            raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
-
-        if pred_mean.ndim == 2:
-            pred_mean = pred_mean.unsqueeze(1)
-            y = y[:, 0, :]
-        y_flat = y.reshape_as(pred_mean)
+        y_flat = self._match_target_shape(y, pred_mean)
         reconstruction = (
             0.5
             * (pred_log_var + (y_flat - pred_mean).pow(2) / pred_log_var.exp()).mean()
@@ -286,14 +288,7 @@ class TDLGM(nn.Module):
 
         # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
 
-        # TODO THIS ONLY SUPPORTS ONE STEP PREDICTION, NEED TO FIX FOR MULTI-STEP
-        if y.ndim >= 3 and y.size(1) != 1:
-            raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
-
-        if pred_mean.ndim == 2:
-            pred_mean = pred_mean.unsqueeze(1)
-            y = y[:, 0, :]
-        y_flat = y.reshape_as(pred_mean)
+        y_flat = self._match_target_shape(y, pred_mean)
         reconstruction = (
             0.5
             * (pred_log_var + (y_flat - pred_mean).pow(2) / pred_log_var.exp()).mean()
@@ -403,4 +398,5 @@ class TDLGM(nn.Module):
         ).item()
 
     def nllLoss(self, mean, y, logvar):
+        y = self._match_target_shape(y, mean)
         return (0.5 * (torch.exp(-logvar) * (y - mean).pow(2) + logvar)).mean()
