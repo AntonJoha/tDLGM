@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from itertools import chain
-
+import random
 import torch
 from torch import nn
 
@@ -8,10 +8,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 @dataclass(slots=True)
-class tDLGMConfig:
+class TDLGMConfig:
     # Architecture
     input_dim: int = 10
-    hidden_size: int = 20
+    hidden_dim: int = 20
     latent_dim: int = 5
     output_dim: int = 10
     layers: int = 2
@@ -40,16 +40,16 @@ class TimeLayer(nn.Module):
     def __init__(
         self,
         input_dim=10,
-        hidden_size=1,
+        hidden_dim=1,
         device=None,
     ):
         super().__init__()
 
-        self.hidden_size = hidden_size
+        self.hidden_dim = hidden_dim
 
         self.lstm = nn.LSTM(
             input_size=input_dim,
-            hidden_size=hidden_size,
+            hidden_size=hidden_dim,
             num_layers=1,
             batch_first=True,
             device=device,
@@ -76,7 +76,7 @@ class TimeRecognition(nn.Module):
             [
                 TimeLayer(
                     input_dim=config.input_dim,
-                    hidden_size=config.hidden_size,
+                    hidden_dim=config.hidden_dim,
                     device=device,
                 )
                 for _ in range(config.layers)
@@ -94,20 +94,45 @@ class TimeRecognition(nn.Module):
 class GenLayer(nn.Module):
     def __init__(
         self,
-        hidden_size=1,
+        layers=1,
+        input_dim=10,
+        hidden_dim=1,
         latent_dim=1,
         device=None,
     ):
         super().__init__()
 
-        self.hidden_size = hidden_size
+        self.hidden_dim = hidden_dim
 
         self.internal_state = None
+        self.latent_dim = latent_dim
 
+        self.first_lstm = nn.LSTM(
+            input_size=input_dim,
+            hidden_size=hidden_dim,
+            num_layers=layers,
+            batch_first=True,
+            device=device,
+        )
+        
+
+        self.ffn = nn.Sequential(
+            nn.Linear(
+                hidden_dim*2,
+                hidden_dim,
+                device=device,
+            ),
+            nn.LeakyReLU(),
+            nn.Linear(
+                hidden_dim,
+                hidden_dim,
+                device=device,
+            ),
+        )
         self.lstm = nn.LSTM(
-            input_size=hidden_size,
-            hidden_size=hidden_size,
-            num_layers=1,
+            input_size=hidden_dim,
+            hidden_size=hidden_dim,
+            num_layers=layers,
             batch_first=True,
             device=device,
         )
@@ -121,10 +146,10 @@ class GenLayer(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(
                 latent_dim,
-                hidden_size,
+                hidden_dim,
                 device=device,
             ),
-            nn.Tanh(),
+            nn.Sigmoid(),
         )
 
     def get_internal_state(self):
@@ -171,29 +196,36 @@ class GenLayer(nn.Module):
             torch.zeros(
                 1,
                 batch_size,
-                self.hidden_size,
+                self.hidden_dim,
                 device=self.lstm.weight_hh_l0.device,
             ),
             torch.zeros(
                 1,
                 batch_size,
-                self.hidden_size,
+                self.hidden_dim,
                 device=self.lstm.weight_hh_l0.device,
             ),
         )
 
     def forward(
         self,
+        x,
         h,
         xi,
     ):
-
-        h, self.internal_state = self.lstm(
-            h,
-            self.internal_state,
+        
+        out, self.internal_state = self.first_lstm(
+            x
         )
-
-        return h + self.g(xi)
+        #print("internal state:", self.internal_state[0].shape, self.internal_state[1].shape)
+        #h, self.internal_state = self.lstm(
+            #h,
+            #self.internal_state,
+        #)
+        h = self.ffn(torch.cat([out, h], dim=-1))
+        g_xi = 0.1*self.g(xi)
+        #print("Magnitude of h:", h.abs().mean().item(), "magnitude of xi:", xi.abs().mean().item(), "magnitude of g(xi):", g_xi.abs().mean().item())
+        return h + g_xi
 
 
 class Generator(nn.Module):
@@ -207,9 +239,11 @@ class Generator(nn.Module):
         self.gen_layers = nn.ModuleList(
             [
                 GenLayer(
-                    config.hidden_size,
-                    config.latent_dim,
-                    device,
+                    layers=config.layers,
+                    input_dim=config.input_dim,
+                    hidden_dim=config.hidden_dim,
+                    latent_dim=config.latent_dim,
+                    device=device,
                 )
                 for _ in range(config.layers)
             ]
@@ -218,15 +252,14 @@ class Generator(nn.Module):
         self.initial_transform = nn.Sequential(
             nn.Linear(
                 config.latent_dim,
-                config.hidden_size,
+                config.hidden_dim,
                 device=device,
             ),
-            nn.Tanh(),
         )
 
         self.output_layer = nn.Sequential(
             nn.Linear(
-                config.hidden_size,
+                config.hidden_dim,
                 2 * config.output_dim,
                 device=device,
             )
@@ -256,6 +289,7 @@ class Generator(nn.Module):
     ):
 
         self.xi = xi
+        #self.xi = [torch.zeros_like(x) for x in self.xi]
 
     def make_internal_state(
         self,
@@ -283,6 +317,7 @@ class Generator(nn.Module):
 
     def forward(
         self,
+        x,
         batch_size,
     ):
 
@@ -296,7 +331,7 @@ class Generator(nn.Module):
 
         for i, layer in enumerate(self.gen_layers):
             v = layer(
-                v,
+                x,v,
                 self.xi[i + 1],
             )
 
@@ -328,7 +363,6 @@ class RecLayer(nn.Module):
                 config.latent_dim,
                 device=config.device,
             ),
-            nn.Tanh(),
         )
 
         self.log_var = nn.Sequential(
@@ -349,7 +383,7 @@ class RecLayer(nn.Module):
 
         z = mean + eps * std
 
-        return mean, torch.diag_embed(std), z
+        return mean, log_var, z
 
 
 class Recognition(nn.Module):
@@ -366,26 +400,64 @@ class Recognition(nn.Module):
     ):
 
         means = []
-        Rs = []
+        logvars = []
         zs = []
 
         for layer in self.rec_layers:
-            mean, R, z = layer(x)
+            mean, logvar, z = layer(x)
 
             means.append(mean)
-            Rs.append(R)
+            logvars.append(logvar)
             zs.append(z)
 
-        return means, Rs, zs
+        return means, logvars, zs
+
+
+# ── Prior ─────────────────────────────────────────────────────────────────────
+
+
+class Prior(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+
+        self.prior_layers = nn.ModuleList(
+            [RecLayer(config) for _ in range(config.layers + 1)]
+        )
+
+    def sample_xi(self, x):
+        prior_mean, prior_logvar = self(x)
+        z = []
+        for m, lv in zip(
+            prior_mean,
+            prior_logvar,):
+            std = torch.exp(0.5 * lv)
+            eps = torch.randn_like(std)
+            z.append(m + eps * std)
+        return z
+
+    def forward(self, x):
+
+        means = []
+        logvars = []
+
+        for layer in self.prior_layers:
+
+            mean = layer.mean(x)
+            logvar = layer.log_var(x)
+
+            means.append(mean)
+            logvars.append(logvar)
+
+        return means, logvars
 
 
 # ── tDLGM ─────────────────────────────────────────────────────────────────────
 
 
-class tDLGM(nn.Module):
+class TDLGM(nn.Module):
     def __init__(
         self,
-        config: tDLGMConfig,
+        config: TDLGMConfig,
     ):
         super().__init__()
 
@@ -397,9 +469,11 @@ class tDLGM(nn.Module):
 
         self.model_r = Recognition(config)
 
+        self.model_p = Prior(config)
+
         self.mse = nn.MSELoss()
         self.loss = nn.GaussianNLLLoss()
-        self.kl_multiplier = 0.01
+        self.kl_multiplier = 0.1
 
     def get_parameters(self):
 
@@ -408,13 +482,33 @@ class tDLGM(nn.Module):
                 self.model_t.parameters(),
                 self.model_g.parameters(),
                 self.model_r.parameters(),
+                self.model_p.parameters()
             )
         )
 
     def gaussian_kl(
+    self,
+    q_mean,
+    q_logvar,
+    p_mean,
+    p_logvar,):
+        q_var = torch.exp(q_logvar)
+        p_var = torch.exp(p_logvar)
+
+        kl = 0.5 * (
+            p_logvar
+            - q_logvar
+            + (q_var + (q_mean - p_mean).pow(2))
+              / p_var
+            - 1
+        )
+
+        return kl.sum(dim=-1).mean()
+
+    def gaussian_kl_old(
         self,
         mean,
-        R,
+        logvar,
     ):
         """
         KL(q(z)||N(0,I))
@@ -422,31 +516,13 @@ class tDLGM(nn.Module):
         q(z)=N(mean, RR^T)
 
         """
+        
+        return 0.5 * torch.sum(
+            torch.exp(logvar) + mean**2 - 1.0 - logvar,
+            dim=-1,
+        ).mean()
 
-        covariance = R @ R.transpose(
-            -1,
-            -2,
-        )
 
-        trace = torch.diagonal(
-            covariance,
-            dim1=-2,
-            dim2=-1,
-        ).sum(-1)
-
-        logdet = 2 * torch.log(
-            torch.diagonal(
-                R,
-                dim1=-2,
-                dim2=-1,
-            )
-        ).sum(-1)
-
-        latent_dim = mean.size(-1)
-
-        kl = 0.5 * (mean.pow(2).sum(-1) + trace - logdet - latent_dim)
-
-        return kl.mean()
 
     def state_loss(
         self,
@@ -481,10 +557,12 @@ class tDLGM(nn.Module):
         y,
         pred_mean,
         pred_log_var,
-        mean,
-        R,
+        mean_q,
+        logvar_q,
         generated_state,
         target_state,
+        mean_p,
+        logvar_p
     ):
 
         # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
@@ -503,33 +581,26 @@ class tDLGM(nn.Module):
         )
 
         kl = 0.0
+        for mq, lvq, mp, lvp in zip(mean_q,logvar_q,mean_p,logvar_p):
+            kl += self.gaussian_kl(mq, lvq, mp, lvp,)
 
-        for m, r in zip(
-            mean,
-            R,
-            strict=False,
-        ):
-            kl += self.gaussian_kl(
-                m,
-                r,
-            )
 
-        kl /= len(mean)
+        kl /= len(mean_q)
 
         consistency = self.state_loss(
             generated_state,
             target_state,
         )
-        self.kl_multiplier *= 1.001
+        self.kl_multiplier *= 1.1
+        self.kl_multiplier = min(self.kl_multiplier, 1.0)
         #print("rec:", reconstruction.item(), "kl:", kl.item())
-        return reconstruction + self.kl_multiplier* kl + 0.01 * consistency
+        return reconstruction + self.kl_multiplier* kl # + consistency*0.1
 
     
 
     def train_step(
         self,
         x,
-        x_1,
         y,
         optimizer,
     ):
@@ -539,6 +610,14 @@ class tDLGM(nn.Module):
         # encode previous state
 
         t = self.model_t(x)
+        
+        x_1 = torch.cat(
+            [
+                x[:, 1:, :],
+                y,
+            ],
+            dim=1,
+        )
 
         t_1 = self.model_t(x_1)
 
@@ -549,10 +628,14 @@ class tDLGM(nn.Module):
         # infer latent noise
 
         mean, R, z = self.model_r(x_1)
+        mean_p, logvar_p = self.model_p(x)
+        
+        if random.random() < 0.8:
+            self.model_g.set_xi(self.model_p.sample_xi(x))
+        else:
+            self.model_g.set_xi(z)
 
-        self.model_g.set_xi(z)
-
-        pred_mean, pred_log_var, state = self.model_g(x.size(0))
+        pred_mean, pred_log_var, state = self.model_g(x, x.size(0))
 
         loss = self.compute_loss(
             y,
@@ -562,28 +645,28 @@ class tDLGM(nn.Module):
             R,
             state,
             t_1,
+            mean_p,
+            logvar_p
         )
 
         loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(
-            self.parameters(),
-            5.0,
-        )
 
         optimizer.step()
 
         return loss.item()
 
     def _compute_losses(
-        self,
+            self,
         y,
         pred_mean,
         pred_log_var,
-        mean,
-        R,
+        mean_q,
+        logvar_q,
         generated_state,
         target_state,
+        mean_p,
+        logvar_p
     ):
 
         # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
@@ -602,29 +685,35 @@ class tDLGM(nn.Module):
         )
 
         kl = 0.0
+        for mq, lvq, mp, lvp in zip(mean_q,logvar_q,mean_p,logvar_p):
+            kl += self.gaussian_kl(mq, lvq, mp, lvp,)
 
-        for m, r in zip(
-            mean,
-            R,
-            strict=False,
-        ):
-            kl += self.gaussian_kl(
-                m,
-                r,
-            )
 
-        kl /= len(mean)
+        kl /= len(mean_q)
 
-        #print("rec:", reconstruction.item(), "kl:", kl.item())
-        return reconstruction, kl
+        consistency = self.state_loss(
+            generated_state,
+            target_state,
+        )
+
+        return reconstruction, self.kl_multiplier*kl, consistency
     
 
     @torch.no_grad()
-    def compute_losses(self, x,x_1,y):
+    def compute_losses(self, x,y, prior=True):
 
         # encode previous state
 
+
         t = self.model_t(x)
+        
+        x_1 = torch.cat(
+            [
+                x[:, 1:, :],
+                y,
+            ],
+            dim=1,
+        )
 
         t_1 = self.model_t(x_1)
 
@@ -635,12 +724,16 @@ class tDLGM(nn.Module):
         # infer latent noise
 
         mean, R, z = self.model_r(x_1)
+        mean_p, logvar_p = self.model_p(x)
 
-        self.model_g.set_xi(z)
+        if prior:
+            self.model_g.set_xi(self.model_p.sample_xi(x))
+        else:
+            self.model_g.set_xi(z)
 
-        pred_mean, pred_log_var, state = self.model_g(x.size(0))
+        pred_mean, pred_log_var, state = self.model_g(x, x.size(0))
 
-        rec, kl = self._compute_losses(
+        rec, kl, consistency = self._compute_losses(
             y,
             pred_mean,
             pred_log_var,
@@ -648,36 +741,41 @@ class tDLGM(nn.Module):
             R,
             state,
             t_1,
+            mean_p,
+            logvar_p
         )
 
 
-        return rec.item(), kl.item()
+        return rec.item(), kl.item(), consistency.item()
 
 
 
 
-    def forward(self, x, x_1=None):
+    def forward(self, x):
 
         t = self.model_t(x)
         self.model_g.make_internal_state(x.size(0))
 
         self.model_g.set_internal_state(t)
 
-        if x_1 is not None:
-            _, _, z = self.model_r(x_1)
-            self.model_g.set_xi(z)
-        else:
-            self.model_g.set_xi(None)
+        #if x_1 is not None:
+            #_, _, z = self.model_r(x)
+            #self.model_g.set_xi(z)
+        #else:
+            #self.model_g.set_xi(None)
 
-        pred_mean, pred_log_var, _ = self.model_g(x.size(0))
+        #mean, logvar, z = self.model_r(x)
+        xi = self.model_p.sample_xi(x)
+        self.model_g.set_xi(xi)
 
-        return pred_mean, pred_log_var
+        pred_mean, pred_log_var, _ = self.model_g(x, x.size(0))
+
+        return pred_mean, pred_log_var, 0, 0, 0
 
     @torch.no_grad()
     def get_loss(
         self,
         x,
-        x_1,
         y,
     ):
 
@@ -685,19 +783,29 @@ class tDLGM(nn.Module):
 
         t = self.model_t(x)
 
+        x_1 = torch.cat(
+            [
+                x[:, 1:, :],
+                y,
+                ],
+            dim=1,
+            )
+    
         t_1 = self.model_t(x_1)
 
         self.model_g.make_internal_state(x.size(0))
 
         self.model_g.set_internal_state(t)
 
-        mean, R, z = self.model_r(x)
+        mean, R, z = self.model_r(x_1)
 
         # print(z)
 
         self.model_g.set_xi(z)
 
-        pred_mean, pred_log_var, state = self.model_g(x.size(0))
+        pred_mean, pred_log_var, state = self.model_g(x, x.size(0))
+
+        mean_p, logvar_p = self.model_p(x)
 
         return self.compute_loss(
             y,
@@ -707,8 +815,20 @@ class tDLGM(nn.Module):
             R,
             state,
             t_1,
+            mean_p,
+            logvar_p,
         ).item()
 
+
+    def nllLoss(self, mean, y, logvar):
+        return (
+            0.5
+            * (
+                torch.exp(-logvar)
+                * (y - mean).pow(2)
+                + logvar
+            )
+        ).mean()
 
 
 
@@ -719,15 +839,14 @@ class tDLGM(nn.Module):
 
 def main():
 
-    from torch.optim import Adam
 
     torch.manual_seed(42)
 
-    config = tDLGMConfig()
+    config = TDLGMConfig()
 
-    model = tDLGM(config).to(device)
+    model = TDLGM(config).to(device)
 
-    optimizer = Adam(
+    optimizer = SGD(
         model.get_parameters(),
         lr=1e-3,
     )

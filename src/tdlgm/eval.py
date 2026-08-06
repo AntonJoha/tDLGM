@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from dataclasses import asdict
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -15,8 +14,6 @@ from tdlgm.util import (
 from tdlgm.tDLGM import device, tDLGM
 from tdlgm.main import unpack_batch
 from tdlgm.baseline import Baseline
-import json
-import logging
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

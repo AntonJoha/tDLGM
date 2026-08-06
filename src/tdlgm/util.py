@@ -51,7 +51,7 @@ class DataConfig:
 @dataclass(slots=True)
 class BaselineConfig(DataConfig):
     input_dim: int = 1
-    hidden_size: int = 20
+    hidden_dim: int = 20
     latent_dim: int = 5
     output_dim: int = 1
     layers: int = 2
@@ -66,15 +66,22 @@ class BaselineConfig(DataConfig):
 @dataclass(slots=True)
 class SeriesConfig(BaselineConfig):
     # Architecture overrides
-    hidden_size: int = 32
+    hidden_dim: int = 32
     latent_dim: int = 8
 
     # Training overrides
     batch_size: int = 64
     learning_rate: float = 1e-3
+
+    beta: float = 1e-3
+    alpha: float = 1e-2
+    weight_decay: float = 1e-5
+
+    std: float = 0.2
+
     # Training/tuning
-    tuning_trials: int = 20
-    tuning_epochs: int = 10
+    tuning_trials: int = 100
+    tuning_epochs: int = 5
     tune: bool = False
 
     # Misc

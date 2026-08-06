@@ -9,10 +9,10 @@ from pathlib import Path
 import optuna
 import torch
 from optuna.exceptions import TrialPruned
-from torch.optim import Adam, SGD
+from torch.optim import SGD
 from torch.utils.data import DataLoader
 
-from tdlgm.tDLGM_new import device, TDLGM
+from tdlgm.rvae import device, TDLGM
 from tdlgm.util import SeriesConfig, make_dataloaders, save_checkpoint, save_config, checkpoint_filename, configure_logging
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ def evaluate(model: TDLGM, loader: DataLoader) -> float:
     for batch in loader:
         x, _, y = unpack_batch(batch)
         mean, logvar, _, _, _ = model(x)
-        loss = model.nllLoss(mean, y[:,0,:], logvar)
+        loss = model.nllLoss(mean, y, logvar.exp())
         losses.append(float(loss))
     model.train()
     return sum(losses) / max(1, len(losses))
@@ -66,7 +66,7 @@ def build_runtime_model(runtime: SeriesConfig) -> tuple[TDLGM, SGD]:
 
     model = TDLGM(runtime).to(device)
     print("PARAMETERS: ", sum(p.numel() for p in model.parameters() if p.requires_grad))
-    optimizer = Adam(model.parameters(), lr=runtime.learning_rate)
+    optimizer = SGD(model.parameters(), lr=runtime.learning_rate)
     return model, optimizer
 
 
@@ -180,7 +180,6 @@ def tune_hyperparameters(
                 5e-2,
                 log=True,
             ),
-            """
         runtime = replace(
             base_runtime,
             hidden_dim=trial.suggest_categorical(
@@ -194,8 +193,8 @@ def tune_hyperparameters(
             layers=trial.suggest_int(
                 "layers",
                 1,
-                6,
-                
+                2,
+                3
             ),
             beta=trial.suggest_float(
                 "beta",
@@ -223,7 +222,21 @@ def tune_hyperparameters(
             ),
         )
 
-        
+        """
+
+
+        runtime = replace(
+            base_runtime,
+            learning_rate=trial.suggest_float(
+                "learning_rate",
+                1e-5,
+                1e-2,
+                log=True,
+            ),
+            
+        )
+
+
 
         _, after = train_model(
             runtime,

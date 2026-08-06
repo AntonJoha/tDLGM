@@ -33,11 +33,11 @@ class Baseline(nn.Module):
         self.config = config
         self.lstm = nn.LSTM(
             config.input_dim,
-            config.hidden_size,
+            config.hidden_dim,
             num_layers=config.layers,
             batch_first=True,
         )
-        self.linear = nn.Linear(config.hidden_size, config.output_dim * 2)
+        self.linear = nn.Linear(config.hidden_dim, config.output_dim * 2)
         self.loss = nn.GaussianNLLLoss()
 
     def forward(self, x):
@@ -115,7 +115,7 @@ def train_model(
 
         if runtime.verbose:
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
-            logger.info("Epoch %03d: %.5f", epoch + 1, mean_loss)
+            logger.info("Epoch %03d: Loss %.5f  Val loss %.5f", epoch + 1, mean_loss, evaluate(model, val_loader))
 
         if trial is not None:
             val_loss = evaluate(model, val_loader)
@@ -163,12 +163,13 @@ def tune_hyperparameters(
         runtime = replace(
             base_runtime,
             seq_len=trial.suggest_categorical("seq_len", [6, 8, 12]),
-            hidden_size=trial.suggest_categorical("hidden_size", [16, 32, 64]),
+            hidden_dim=trial.suggest_categorical("hidden_dim", [16, 32, 64, 128, 256]),
+            batch_size=trial.suggest_categorical("batch_size", [4, 8, 16, 32, 64, 128]),
             layers=trial.suggest_categorical("layers", [1, 2, 3, 5, 10]),
-            learning_rate=trial.suggest_float(
+learning_rate=trial.suggest_float(
                 "learning_rate",
                 1e-5,
-                5e-1,
+                5e-3,
                 log=True,
             ),
         )
