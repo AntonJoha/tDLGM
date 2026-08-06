@@ -3,29 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import argparse
 import logging
-from dataclasses import fields, replace
+from dataclasses import replace
 from pathlib import Path
 
 import optuna
 import torch
 from optuna.exceptions import TrialPruned
-from torch.optim import Adam, SGD
+from torch.optim import Adam
 from torch.utils.data import DataLoader
 
 from tdlgm.tDLGM_new import device, TDLGM
 from tdlgm.util import SeriesConfig, make_dataloaders, save_checkpoint, save_config, checkpoint_filename, configure_logging
 
 logger = logging.getLogger(__name__)
-
-
-def tdlgm_config(args) -> SeriesConfig:
-    return SeriesConfig(
-        **{
-            k: v
-            for k, v in vars(args).items()
-            if k in {f.name for f in fields(SeriesConfig)}
-        }
-    )
 
 
 def unpack_batch(
@@ -61,11 +51,8 @@ def evaluate(model: TDLGM, loader: DataLoader) -> float:
     model.train()
     return sum(losses) / max(1, len(losses))
 
-def build_runtime_model(runtime: SeriesConfig) -> tuple[TDLGM, SGD]:
-    #model_config = TDLGMConfig(**vars(runtime))
-
+def build_runtime_model(runtime: SeriesConfig) -> tuple[TDLGM, Adam]:
     model = TDLGM(runtime).to(device)
-    print("PARAMETERS: ", sum(p.numel() for p in model.parameters() if p.requires_grad))
     optimizer = Adam(model.parameters(), lr=runtime.learning_rate)
     return model, optimizer
 
@@ -100,7 +87,7 @@ def train_model(
         recon_loss, kl_loss, consistency = 0.0, 0.0, 0.0
         recon_loss_p, kl_loss_p, consistency_p = 0.0, 0.0, 0.0
         for batch in train_loader:
-            x, x_1, y = unpack_batch(batch)
+            x, _, y = unpack_batch(batch)
             epoch_losses.append(model.train_step(x, y, optimizer))
             t_recon_loss, t_kl_loss, t_consistency = model.compute_losses(x, y, prior=False)
             t_recon_loss_p, t_kl_loss_p, t_consistency_p = model.compute_losses(x, y, prior=True)
@@ -138,7 +125,7 @@ def train_model(
         if save_to is not None and (
             (epoch + 1) % checkpoint_interval == 0 or epoch + 1 == train_epochs
         ):
-            checkpoint_path = save_to / checkpoint_filename( f"{(epoch + 1):04d}")
+            checkpoint_path = save_to / checkpoint_filename(f"{epoch + 1:04d}")
             save_checkpoint(model, runtime, checkpoint_path)
             if runtime.verbose:
                 logger.info("Saved checkpoint to %s", checkpoint_path)
@@ -155,7 +142,6 @@ def train_model(
 
     # Save final checkpoint if save_to is specified
     if save_to is not None:
-        print("Save to: ", save_to)
         check = save_to / checkpoint_filename("final")
         checkpoint_path = save_checkpoint(model, runtime, check)
         if runtime.verbose:
@@ -167,36 +153,11 @@ def tune_hyperparameters(
     base_runtime: SeriesConfig,
 ) -> SeriesConfig:
     def objective(trial: optuna.Trial) -> float:
-        """
-            seq_len=trial.suggest_categorical("seq_len", [6, 8, 12, 16, 20]),
-            batch_size=trial.suggest_categorical("batch_size", [4, 8, 16, 32, 64, 128]),
-            hidden_dim=trial.suggest_categorical(
-                "hidden_dim", [16, 32, 64, 128, 256, 512]
-            ),
-            latent_dim=trial.suggest_categorical("latent_dim", [4, 8, 16, 32, 64, 128]),
-            learning_rate=trial.suggest_float(
-                "learning_rate",
-                1e-4,
-                5e-2,
-                log=True,
-            ),
-            """
         runtime = replace(
             base_runtime,
-            hidden_dim=trial.suggest_categorical(
-                "hidden_dim",
-                [2,4,8, 16],
-            ),
-            latent_dim=trial.suggest_categorical(
-                "latent_dim",
-                [8, 16, 32, 64, 128],
-            ),
-            layers=trial.suggest_int(
-                "layers",
-                1,
-                6,
-                
-            ),
+            hidden_dim=trial.suggest_categorical("hidden_dim", [2, 4, 8, 16]),
+            latent_dim=trial.suggest_categorical("latent_dim", [8, 16, 32, 64, 128]),
+            layers=trial.suggest_int("layers", 1, 6),
             beta=trial.suggest_float(
                 "beta",
                 1e-6,
@@ -222,8 +183,6 @@ def tune_hyperparameters(
                 log=True,
             ),
         )
-
-        
 
         _, after = train_model(
             runtime,
@@ -334,12 +293,6 @@ def parse_args() -> argparse.Namespace:
     )
 
     return parser.parse_args()
-
-
-def setup(args: argparse.Namespace) -> None:
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
 
 
 def main() -> None:

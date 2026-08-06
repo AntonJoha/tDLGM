@@ -1,5 +1,5 @@
 import logging
-from dataclasses import fields, replace
+from dataclasses import replace
 
 from datetime import datetime, timezone
 import optuna
@@ -14,16 +14,6 @@ from tdlgm.util import BaselineConfig, SeriesConfig, make_dataloaders, save_chec
 
 logger = logging.getLogger(__name__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-def tdlgm_config(args) -> BaselineConfig:
-    return BaselineConfig(
-        **{
-            k: v
-            for k, v in vars(args).items()
-            if k in {f.name for f in fields(BaselineConfig)}
-        }
-    )
 
 
 class Baseline(nn.Module):
@@ -126,7 +116,7 @@ def train_model(
         if save_to is not None and (
             (epoch + 1) % checkpoint_interval == 0 or epoch + 1 == train_epochs
         ):
-            checkpoint_path = save_to / checkpoint_filename( f"{(epoch + 1):04d}")
+            checkpoint_path = save_to / checkpoint_filename(f"{epoch + 1:04d}")
             save_checkpoint(model, runtime, checkpoint_path)
             if runtime.verbose:
                 logger.info("Saved checkpoint to %s", checkpoint_path)
@@ -146,7 +136,6 @@ def train_model(
 
     # Save final checkpoint if save_to is specified
     if save_to is not None:
-        print("Save to: ", save_to)
         check = save_to / checkpoint_filename("final")
         checkpoint_path = save_checkpoint(model, runtime, check)
         if runtime.verbose:

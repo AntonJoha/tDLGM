@@ -1,18 +1,14 @@
 import csv
 import logging
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
-from distutils.util import strtobool
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import time
 import json
 
-import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, random_split
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +20,9 @@ def configure_logging(verbose: bool) -> None:
         format="%(message)s",
     )
     import optuna.logging
+
     optuna.logging.set_verbosity(
-        optuna.logging.INFO  # if verbose else optuna.logging.WARNING, For now I always want to see the optuna logs.
+        optuna.logging.INFO if verbose else optuna.logging.WARNING
     )
 
 
@@ -89,160 +86,6 @@ class SeriesConfig(BaselineConfig):
     baseline: bool = False
 
 
-# Converts the contents in a .tsf file into a dataframe and returns it along with other meta-data of the dataset: frequency, horizon, whether the dataset contains missing values and whether the series have equal lengths
-#
-# Parameters
-# full_file_path_and_name - complete .tsf file path
-# replace_missing_vals_with - a term to indicate the missing values in series in the returning dataframe
-# value_column_name - Any name that is preferred to have as the name of the column containing series values in the returning dataframe
-def convert_tsf_to_dataframe(
-    full_file_path_and_name,
-    replace_missing_vals_with="NaN",
-    value_column_name="series_value",
-):
-    col_names = []
-    col_types = []
-    all_data = {}
-    line_count = 0
-    frequency = None
-    forecast_horizon = None
-    contain_missing_values = None
-    contain_equal_length = None
-    found_data_tag = False
-    found_data_section = False
-    started_reading_data_section = False
-
-    with open(full_file_path_and_name, "r", encoding="cp1252") as file:
-        for line in file:
-            # Strip white space from start/end of line
-            line = line.strip()
-
-            if line:
-                if line.startswith("@"):  # Read meta-data
-                    if not line.startswith("@data"):
-                        line_content = line.split(" ")
-                        if line.startswith("@attribute"):
-                            if (
-                                len(line_content) != 3
-                            ):  # Attributes have both name and type
-                                raise ValueError("Invalid meta-data specification.")
-
-                            col_names.append(line_content[1])
-                            col_types.append(line_content[2])
-                        else:
-                            if (
-                                len(line_content) != 2
-                            ):  # Other meta-data have only values
-                                raise ValueError("Invalid meta-data specification.")
-
-                            if line.startswith("@frequency"):
-                                frequency = line_content[1]
-                            elif line.startswith("@horizon"):
-                                forecast_horizon = int(line_content[1])
-                            elif line.startswith("@missing"):
-                                contain_missing_values = bool(
-                                    strtobool(line_content[1])
-                                )
-                            elif line.startswith("@equallength"):
-                                contain_equal_length = bool(strtobool(line_content[1]))
-
-                    else:
-                        if len(col_names) == 0:
-                            raise ValueError(
-                                "Missing attribute section. Attribute section must come before data."
-                            )
-
-                        found_data_tag = True
-                elif not line.startswith("#"):
-                    if len(col_names) == 0:
-                        raise ValueError(
-                            "Missing attribute section. Attribute section must come before data."
-                        )
-                    elif not found_data_tag:
-                        raise ValueError("Missing @data tag.")
-                    else:
-                        if not started_reading_data_section:
-                            started_reading_data_section = True
-                            found_data_section = True
-                            all_series = []
-
-                            for col in col_names:
-                                all_data[col] = []
-
-                        full_info = line.split(":")
-
-                        if len(full_info) != (len(col_names) + 1):
-                            raise ValueError("Missing attributes/values in series.")
-
-                        series = full_info[len(full_info) - 1]
-                        series = series.split(",")
-
-                        if len(series) == 0:
-                            raise ValueError(
-                                "A given series should contains a set of comma separated numeric values. At least one numeric value should be there in a series. Missing values should be indicated with ? symbol"
-                            )
-
-                        numeric_series = []
-
-                        for val in series:
-                            if val == "?":
-                                numeric_series.append(replace_missing_vals_with)
-                            else:
-                                numeric_series.append(float(val))
-
-                        if numeric_series.count(replace_missing_vals_with) == len(
-                            numeric_series
-                        ):
-                            raise ValueError(
-                                "All series values are missing. A given series should contains a set of comma separated numeric values. At least one numeric value should be there in a series."
-                            )
-
-                        all_series.append(pd.Series(numeric_series).array)
-
-                        for i in range(len(col_names)):
-                            att_val = None
-                            if col_types[i] == "numeric":
-                                att_val = int(full_info[i])
-                            elif col_types[i] == "string":
-                                att_val = str(full_info[i])
-                            elif col_types[i] == "date":
-                                att_val = datetime.strptime(
-                                    full_info[i], "%Y-%m-%d %H-%M-%S"
-                                ).replace(tzinfo=timezone.utc)
-                            else:
-                                raise ValueError(
-                                    "Invalid attribute type."
-                                )  # Currently, the code supports only numeric, string and date types. Extend this as required.
-
-                            if att_val is None:
-                                raise ValueError("Invalid attribute value.")
-                            else:
-                                all_data[col_names[i]].append(att_val)
-
-                line_count = line_count + 1
-
-        if line_count == 0:
-            raise ValueError("Empty file.")
-        if len(col_names) == 0:
-            raise ValueError("Missing attribute section.")
-        if not found_data_section:
-            raise ValueError("Missing series information under data section.")
-
-        all_data[value_column_name] = all_series
-        loaded_data = pd.DataFrame(all_data)
-
-        return (
-            loaded_data,
-            frequency,
-            forecast_horizon,
-            contain_missing_values,
-            contain_equal_length,
-        )
-
-
-
-
-
 def checkpoint_payload(model: nn.Module, runtime: SeriesConfig) -> dict[str, object]:
     return {
         "config": asdict(runtime),
@@ -292,108 +135,6 @@ def load_checkpoint(checkpoint_path: Path) -> tuple[SeriesConfig, SeriesConfig, 
 
 
 
-
-
-class TimeSeriesDataset(Dataset):
-    def __init__(self, series, context_length, horizon, mean, std):
-        self.series = torch.tensor(series, dtype=torch.float32)
-        self.context_length = context_length
-        self.horizon = horizon
-
-        # normalize the series
-        # Compute statistics from the dataset
-        self.mean = mean
-        self.std = std
-
-    def __len__(self):
-        return max(0, len(self.series) - self.context_length - self.horizon + 1)
-
-    def __getitem__(self, idx):
-        x = (self.series[idx : idx + self.context_length] - self.mean) / self.std
-
-        y = (
-            self.series[
-                idx + self.context_length : idx + self.context_length + self.horizon
-            ]
-            - self.mean
-        ) / self.std
-
-        return x, y
-
-
-def get_dataset(
-    tsf_file_path,
-    context_length,
-    horizon,
-    batch_size=32,
-    train_test_split=0.8,
-    reduced_dataset=None,
-):
-    tsf_file_path = Path(tsf_file_path)
-    if not tsf_file_path.exists():
-        raise FileNotFoundError(tsf_file_path)
-    df, _freq, _horizon, _has_missing, _equal_length = convert_tsf_to_dataframe(
-        tsf_file_path
-    )
-
-    ## normalize data
-    all_values = []
-    for row in df["series_value"]:
-        all_values.extend(row)
-    all_values = np.array(all_values)
-    mean = np.mean(all_values)
-    std = np.std(all_values)
-
-    dataset = None
-    for row in df["series_value"]:
-        if dataset is None:
-            dataset = TimeSeriesDataset(
-                row, context_length=context_length, horizon=horizon, mean=mean, std=std
-            )
-        else:
-            dataset = ConcatDataset(
-                [
-                    dataset,
-                    TimeSeriesDataset(
-                        row,
-                        context_length=context_length,
-                        horizon=horizon,
-                        mean=mean,
-                        std=std,
-                    ),
-                ]
-            )
-
-    if len(dataset) < 2:
-        raise ValueError("dataset must contain at least two windows")
-
-    train_size = int(len(dataset) * train_test_split)
-    train_size = min(max(1, train_size), len(dataset) - 1)
-    test_size = len(dataset) - train_size
-
-    train_dataset, test_dataset = random_split(
-        dataset,
-        [train_size, test_size],
-    )
-
-    if reduced_dataset is not None:
-        train_size = max(1, int(reduced_dataset * len(train_dataset)))
-        test_size = max(1, int(reduced_dataset * len(test_dataset)))
-        train_dataset, _ = random_split(
-            train_dataset,
-            [train_size, len(train_dataset) - train_size],
-        )
-        test_dataset, _ = random_split(
-            test_dataset,
-            [test_size, len(test_dataset) - test_size],
-        )
-
-    train_df = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_df = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
-
-    logger.info(f"Train dataset size: {len(train_dataset)}")
-    logger.info(f"Test dataset size: {len(test_dataset)}")
-    return train_df, test_df
 
 
 class WindowedSeriesDataset(Dataset):
@@ -479,43 +220,5 @@ def get_shampoo_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoade
 
 
 def make_dataloaders(config: DataConfig) -> tuple[DataLoader, DataLoader]:
-    dataset_path = Path(get_dataset_names()[0])
+    return get_shampoo_dataloaders(config)
 
-    if config.shampoo_code or not dataset_path.exists():
-        if not dataset_path.exists() and not config.shampoo_code:
-            logger.warning(
-                "Dataset %s not found; falling back to the bundled shampoo data.",
-                dataset_path,
-            )
-        return get_shampoo_dataloaders(config)
-
-    return get_dataset(
-        dataset_path,
-        config.seq_len,
-        config.horizon,
-        config.batch_size,
-        train_test_split=config.train_fraction,
-        reduced_dataset=config.reduced_dataset,
-    )
-
-
-def get_dataset_names():
-    return ["data/pedestrian_counts_dataset.tsf"]
-
-
-def main():
-    config = SeriesConfig(seq_len=5, horizon=1, batch_size=8, shampoo_code=True)
-    train_df, test_df = make_dataloaders(config)
-
-    for batch in train_df:
-        x, y = batch
-        print(f"Input shape: {x.shape}, Target shape: {y.shape}")
-        break
-    for batch in test_df:
-        x, y = batch
-        print(f"Input shape: {x.shape}, Target shape: {y.shape}")
-        break
-
-
-if __name__ == "__main__":
-    main()

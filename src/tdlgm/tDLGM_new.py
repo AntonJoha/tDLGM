@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from itertools import chain
 import torch
 from torch import nn
 import logging
@@ -55,7 +54,7 @@ class TDLGM(nn.Module):
             )
 
         self.model_r = nn.Sequential(
-                nn.Linear(config.input_dim*(1+config.seq_len) + config.hidden_dim, config.hidden_dim),
+                nn.Linear(config.input_dim * config.seq_len + config.hidden_dim, config.hidden_dim),
                 nn.ReLU(),
                 nn.Linear(config.hidden_dim, config.hidden_dim),
                 nn.ReLU(),
@@ -110,16 +109,6 @@ class TDLGM(nn.Module):
         eps = torch.randn_like(std)
         return mean + eps * std
 
-    def get_parameters(self):
-
-        return list(
-            chain(
-                self.model_t.parameters(),
-                self.model_g.parameters(),
-                self.model_r.parameters(),
-                self.model_p.parameters()
-            )
-        )
 
     def gaussian_kl(
     self,
@@ -140,52 +129,6 @@ class TDLGM(nn.Module):
 
         return kl.sum(dim=-1).mean()
 
-    def gaussian_kl_old(
-        self,
-        mean,
-        logvar,
-    ):
-        """
-        KL(q(z)||N(0,I))
-
-        q(z)=N(mean, RR^T)
-
-        """
-        
-        return 0.5 * torch.sum(
-            torch.exp(logvar) + mean**2 - 1.0 - logvar,
-            dim=-1,
-        ).mean()
-
-
-
-    def state_loss(
-        self,
-        generated_state,
-        target_state,
-    ):
-
-        loss = 0.0
-
-        for g, t in zip(
-            generated_state,
-            target_state,
-            strict=False,
-        ):
-            gh, gc = g
-            th, tc = t
-
-            loss += self.mse(
-                gh,
-                th,
-            )
-
-            loss += self.mse(
-                gc,
-                tc,
-            )
-
-        return loss
 
     def compute_loss(
         self,
@@ -242,13 +185,7 @@ class TDLGM(nn.Module):
         t = t[:, -1, :]
 
 
-        x_1 = torch.cat(
-        [
-            x,
-            y,
-        ],
-            dim=1,
-        )
+        x_1 = torch.cat((x, y), dim=1)[:, 1:, :]
         xi_r = self.model_r(
                 torch.cat([x_1.flatten(-2,-1),t,],dim=-1,)
                 )
@@ -333,13 +270,7 @@ class TDLGM(nn.Module):
         t = t[:, -1, :]
 
 
-        x_1 = torch.cat(
-        [
-            x,
-            y,
-        ],
-            dim=1,
-        )
+        x_1 = torch.cat((x, y), dim=1)[:, 1:, :]
         xi_r = self.model_r(
                 torch.cat([x_1.flatten(-2,-1),t,],dim=-1,)
                 )
@@ -394,13 +325,7 @@ class TDLGM(nn.Module):
         t = t[:, -1, :]
 
 
-        x_1 = torch.cat(
-        [
-            x,
-            y,
-        ],
-            dim=1,
-        )
+        x_1 = torch.cat((x, y), dim=1)[:, 1:, :]
         xi_r = self.model_r(x_1.flatten(-2, -1))
         mean, logvar = torch.chunk(xi_r, 2, dim=-1)
 
@@ -446,132 +371,3 @@ class TDLGM(nn.Module):
 
 
 
-
-
-# ── Self Test ────────────────────────────────────────────────────────────────
-
-
-def main():
-
-
-    torch.manual_seed(42)
-
-    config = TDLGMConfig()
-
-    model = TDLGM(config).to(device)
-
-    optimizer = SGD(
-        model.get_parameters(),
-        lr=1e-3,
-    )
-
-    # ---------------------------------------------------------
-    # Create synthetic sequence prediction problem
-    #
-    # x_t  -> x_{t+1}
-    #
-    # ---------------------------------------------------------
-
-    batch_size = 64
-    seq_len = 3
-    input_dim = 10
-
-    x = torch.randn(
-        batch_size,
-        seq_len,
-        input_dim,
-        device=device,
-    )
-
-    # target next observation
-
-    y = torch.randn(
-        batch_size,
-        1,
-        input_dim,
-        device=device,
-    )
-
-    # construct x_1:
-    #
-    # [x_1,x_2,x_3,y]
-    #
-    # take future sequence
-
-    x_1 = torch.cat(
-        [
-            x,
-            y,
-        ],
-        dim=1,
-    )[:, 1:, :]
-
-    print(
-        "Input:",
-        x.shape,
-    )
-
-    print(
-        "Target:",
-        y.shape,
-    )
-
-    print(
-        "Next state:",
-        x_1.shape,
-    )
-
-    # ---------------------------------------------------------
-    # Initial loss
-    # ---------------------------------------------------------
-
-    before = model.get_loss(
-        x,
-        x_1,
-        y,
-    )
-
-    print(f"Loss before training: {before:.5f}")
-
-    # ---------------------------------------------------------
-    # Train
-    # ---------------------------------------------------------
-
-    model.train()
-
-    losses = []
-
-    for step in range(300):
-        loss = model.train_step(
-            x,
-            x_1,
-            y,
-            optimizer,
-        )
-
-        losses.append(loss)
-
-        if step % 50 == 0:
-            print(f"Step {step}: {loss:.5f}")
-
-    # ---------------------------------------------------------
-    # Final loss
-    # ---------------------------------------------------------
-
-    after = model.get_loss(
-        x,
-        x_1,
-        y,
-    )
-
-    print(f"Loss after training: {after:.5f}")
-
-    assert torch.isfinite(torch.tensor(after))
-
-    assert after < before, "Model did not improve"
-
-    print("Test passed.")
-
-
-if __name__ == "__main__":
-    main()

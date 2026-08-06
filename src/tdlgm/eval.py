@@ -11,7 +11,7 @@ from tdlgm.util import (
     load_checkpoint,
     make_dataloaders,
 )
-from tdlgm.tDLGM import device, tDLGM
+from tdlgm.tDLGM_new import device, TDLGM
 from tdlgm.main import unpack_batch
 from tdlgm.baseline import Baseline
 
@@ -60,14 +60,14 @@ def evaluate_baseline(model: nn.Module, loader: DataLoader) -> float:
     return sum(losses) / max(1, len(losses)), input_output_pairs
 
 @torch.no_grad()
-def evaluate_tdlgm(model: nn.Module, loader: DataLoader) -> float:
+def evaluate_tdlgm(model: TDLGM, loader: DataLoader) -> float:
     model.eval()
     losses = []
     input_output_pairs = []
     for batch in loader:
         x, _, y = unpack_batch(batch)
-        mean, logvar = model(x,y)
-        loss = model.loss(mean, y, logvar.exp())
+        mean, logvar, _, _, _ = model(x)
+        loss = model.nllLoss(mean, y[:, 0, :], logvar)
         losses.append(float(loss))
         
         input_output_pairs.append(
@@ -88,13 +88,13 @@ def evaluate_tdlgm(model: nn.Module, loader: DataLoader) -> float:
 
 
 
-def benchmark_model( model: Path) -> None:
-    runtime, model_config, model_state = load_checkpoint(model)
+def benchmark_model(checkpoint_path: Path) -> None:
+    runtime, model_config, model_state = load_checkpoint(checkpoint_path)
     runtime.reduced_dataset = 0.2
     print(runtime.shampoo_code)
     
     if runtime.model_name == "tdlgm":
-        model = tDLGM(model_config).to(device)
+        model = TDLGM(model_config).to(device)
         model.load_state_dict(model_state)
         for i in range(10):
             _, val_loader = make_dataloaders(runtime)
@@ -110,14 +110,11 @@ def benchmark_model( model: Path) -> None:
 
 
 
-def main(path=None) -> None:
+def main() -> None:
     args = parse_args()
     configure_logging(args.verbose)
-    benchmark_model(path)
+    benchmark_model(args.checkpoint_path)
     
 
 if __name__ == "__main__":
-
-    path = Path( "artifacts/tdlgm/checkpoint_epochfinal_20260804-095028.pt")
-    #path = Path("artifacts/baseline_tune/checkpoint_epochfinal_20260804-095636.pt")
-    main(path)
+    main()
