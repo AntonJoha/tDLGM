@@ -78,6 +78,7 @@ def train_model(
     save_to: Path | None = None,
 ) -> tuple[float, float]:
     torch.manual_seed(runtime.seed)
+    runtime = replace(runtime, output_dim=runtime.horizon)
 
     model = Baseline(runtime).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=runtime.learning_rate)
