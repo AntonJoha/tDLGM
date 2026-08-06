@@ -368,6 +368,3 @@ class TDLGM(nn.Module):
                 + logvar
             )
         ).mean()
-
-
-

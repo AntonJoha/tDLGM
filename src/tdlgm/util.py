@@ -221,4 +221,3 @@ def get_shampoo_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoade
 
 def make_dataloaders(config: DataConfig) -> tuple[DataLoader, DataLoader]:
     return get_shampoo_dataloaders(config)
-
