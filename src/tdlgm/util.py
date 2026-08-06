@@ -1,22 +1,22 @@
 import csv
+import json
 import logging
-from dataclasses import dataclass, asdict
+import time
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from distutils.util import strtobool
 from pathlib import Path
 
-import time
-import json
-
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 
 logger = logging.getLogger(__name__)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def configure_logging(verbose: bool) -> None:
     logging.basicConfig(
@@ -24,11 +24,10 @@ def configure_logging(verbose: bool) -> None:
         format="%(message)s",
     )
     import optuna.logging
+
     optuna.logging.set_verbosity(
-        optuna.logging.INFO  # if verbose else optuna.logging.WARNING, For now I always want to see the optuna logs.
+        optuna.logging.INFO if verbose else optuna.logging.WARNING
     )
-
-
 
 
 DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
@@ -240,9 +239,6 @@ def convert_tsf_to_dataframe(
         )
 
 
-
-
-
 def checkpoint_payload(model: nn.Module, runtime: SeriesConfig) -> dict[str, object]:
     return {
         "config": asdict(runtime),
@@ -251,18 +247,22 @@ def checkpoint_payload(model: nn.Module, runtime: SeriesConfig) -> dict[str, obj
     }
 
 
-def save_checkpoint(model: nn.Module, runtime: SeriesConfig, checkpoint_path: Path) -> Path:
+def save_checkpoint(
+    model: nn.Module, runtime: SeriesConfig, checkpoint_path: Path
+) -> Path:
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    print("Saving checkpoint to: ", checkpoint_path)
-    torch.save(checkpoint_payload(model, runtime), str(checkpoint_path) + f"_{runtime.run_id}.pt")
-    return checkpoint_path
+    saved_path = checkpoint_path.with_name(
+        f"{checkpoint_path.name}_{runtime.run_id}.pt"
+    )
+    torch.save(checkpoint_payload(model, runtime), saved_path)
+    return saved_path
 
 
 def save_config(
     runtime: SeriesConfig, model: nn.Module, output_dir: Path, run_id: str
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    config_path = output_dir / f"config_{runtime.run_id}.json"
+    config_path = output_dir / f"config_{run_id}.json"
     with config_path.open("w", encoding="utf-8") as handle:
         json.dump(
             {
@@ -278,20 +278,18 @@ def save_config(
     return config_path
 
 
-def checkpoint_filename( epoch) -> str:
-    return f"checkpoint_epoch{epoch}"
+def checkpoint_filename(suffix: str) -> str:
+    return f"checkpoint_epoch{suffix}"
 
 
-def load_checkpoint(checkpoint_path: Path) -> tuple[SeriesConfig, SeriesConfig, nn.Module]:
+def load_checkpoint(
+    checkpoint_path: Path,
+) -> tuple[SeriesConfig, SeriesConfig, dict[str, torch.Tensor]]:
     checkpoint = torch.load(checkpoint_path, map_location=device)
     runtime = SeriesConfig(**checkpoint["config"])
     model_config = SeriesConfig(**checkpoint["model_config"])
-    model = checkpoint["model_state_dict"]
-    return runtime, model_config, model
-
-
-
-
+    model_state = checkpoint["model_state_dict"]
+    return runtime, model_config, model_state
 
 
 class TimeSeriesDataset(Dataset):
@@ -501,21 +499,3 @@ def make_dataloaders(config: DataConfig) -> tuple[DataLoader, DataLoader]:
 
 def get_dataset_names():
     return ["data/pedestrian_counts_dataset.tsf"]
-
-
-def main():
-    config = SeriesConfig(seq_len=5, horizon=1, batch_size=8, shampoo_code=True)
-    train_df, test_df = make_dataloaders(config)
-
-    for batch in train_df:
-        x, y = batch
-        print(f"Input shape: {x.shape}, Target shape: {y.shape}")
-        break
-    for batch in test_df:
-        x, y = batch
-        print(f"Input shape: {x.shape}, Target shape: {y.shape}")
-        break
-
-
-if __name__ == "__main__":
-    main()
