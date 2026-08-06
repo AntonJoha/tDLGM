@@ -16,6 +16,21 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 
 logger = logging.getLogger(__name__)
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def configure_logging(verbose: bool) -> None:
+    logging.basicConfig(
+        level=logging.INFO if verbose else logging.WARNING,
+        format="%(message)s",
+    )
+    import optuna.logging
+    optuna.logging.set_verbosity(
+        optuna.logging.INFO  # if verbose else optuna.logging.WARNING, For now I always want to see the optuna logs.
+    )
+
+
+
+
 DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
 
 
@@ -30,12 +45,13 @@ class DataConfig:
     artifact_dir: str = "artifacts/tdlgm"
     checkpoint_interval: int = 10
     run_id: str | None = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    model_name: str = "tdlgm"
 
 
 @dataclass(slots=True)
 class BaselineConfig(DataConfig):
     input_dim: int = 1
-    hidden_size: int = 20
+    hidden_dim: int = 20
     latent_dim: int = 5
     output_dim: int = 1
     layers: int = 2
@@ -50,15 +66,22 @@ class BaselineConfig(DataConfig):
 @dataclass(slots=True)
 class SeriesConfig(BaselineConfig):
     # Architecture overrides
-    hidden_size: int = 32
+    hidden_dim: int = 32
     latent_dim: int = 8
 
     # Training overrides
     batch_size: int = 64
     learning_rate: float = 1e-3
+
+    beta: float = 1e-3
+    alpha: float = 1e-2
+    weight_decay: float = 1e-5
+
+    std: float = 0.2
+
     # Training/tuning
-    tuning_trials: int = 20
-    tuning_epochs: int = 10
+    tuning_trials: int = 100
+    tuning_epochs: int = 5
     tune: bool = False
 
     # Misc
@@ -259,11 +282,14 @@ def checkpoint_filename( epoch) -> str:
     return f"checkpoint_epoch{epoch}"
 
 
-def load_checkpoint(checkpoint_path: Path) -> tuple[SeriesConfig, SeriesConfig]:
+def load_checkpoint(checkpoint_path: Path) -> tuple[SeriesConfig, SeriesConfig, nn.Module]:
     checkpoint = torch.load(checkpoint_path, map_location=device)
     runtime = SeriesConfig(**checkpoint["config"])
     model_config = SeriesConfig(**checkpoint["model_config"])
-    return runtime, model_config
+    model = checkpoint["model_state_dict"]
+    return runtime, model_config, model
+
+
 
 
 
