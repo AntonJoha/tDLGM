@@ -1,22 +1,22 @@
 import csv
+import json
 import logging
-from dataclasses import dataclass, asdict
+import time
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from distutils.util import strtobool
 from pathlib import Path
 
-import time
-import json
-
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 
 logger = logging.getLogger(__name__)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def configure_logging(verbose: bool) -> None:
     logging.basicConfig(
@@ -28,8 +28,6 @@ def configure_logging(verbose: bool) -> None:
     optuna.logging.set_verbosity(
         optuna.logging.INFO if verbose else optuna.logging.WARNING
     )
-
-
 
 
 DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
@@ -241,9 +239,6 @@ def convert_tsf_to_dataframe(
         )
 
 
-
-
-
 def checkpoint_payload(model: nn.Module, runtime: SeriesConfig) -> dict[str, object]:
     return {
         "config": asdict(runtime),
@@ -252,7 +247,9 @@ def checkpoint_payload(model: nn.Module, runtime: SeriesConfig) -> dict[str, obj
     }
 
 
-def save_checkpoint(model: nn.Module, runtime: SeriesConfig, checkpoint_path: Path) -> Path:
+def save_checkpoint(
+    model: nn.Module, runtime: SeriesConfig, checkpoint_path: Path
+) -> Path:
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     saved_path = checkpoint_path.with_name(
         f"{checkpoint_path.name}_{runtime.run_id}.pt"
@@ -281,8 +278,8 @@ def save_config(
     return config_path
 
 
-def checkpoint_filename(epoch: str) -> str:
-    return f"checkpoint_epoch{epoch}"
+def checkpoint_filename(suffix: str) -> str:
+    return f"checkpoint_epoch{suffix}"
 
 
 def load_checkpoint(
@@ -293,10 +290,6 @@ def load_checkpoint(
     model_config = SeriesConfig(**checkpoint["model_config"])
     model_state = checkpoint["model_state_dict"]
     return runtime, model_config, model_state
-
-
-
-
 
 
 class TimeSeriesDataset(Dataset):

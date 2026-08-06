@@ -1,10 +1,13 @@
+import logging
 from dataclasses import dataclass
 from itertools import chain
+
 import torch
 from torch import nn
-import logging
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
+
 
 @dataclass(slots=True)
 class TDLGMConfig:
@@ -23,9 +26,6 @@ class TDLGMConfig:
     # Misc
     seed: int = 42
     device: str | None = None
-
-
-
 
 
 # ── tDLGM ─────────────────────────────────────────────────────────────────────
@@ -47,36 +47,37 @@ class TDLGM(nn.Module):
             batch_first=True,
         )
         self.model_g = nn.Sequential(
-                nn.Linear(config.latent_dim, config.hidden_dim),
-                nn.ReLU(),
-                nn.Linear(config.hidden_dim, config.hidden_dim),
-                nn.ReLU(),
-                nn.Linear(config.hidden_dim, config.hidden_dim),
-            )
+            nn.Linear(config.latent_dim, config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+        )
 
         self.model_r = nn.Sequential(
-                nn.Linear(config.input_dim*(1+config.seq_len) + config.hidden_dim, config.hidden_dim),
-                nn.ReLU(),
-                nn.Linear(config.hidden_dim, config.hidden_dim),
-                nn.ReLU(),
-                nn.Linear(config.hidden_dim, config.latent_dim * 2),
-            )
+            nn.Linear(
+                config.input_dim * (1 + config.seq_len) + config.hidden_dim,
+                config.hidden_dim,
+            ),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.latent_dim * 2),
+        )
 
         self.model_p = nn.Sequential(
-                nn.Linear(config.input_dim*config.seq_len, config.hidden_dim),
-                nn.ReLU(),
-                nn.Linear(config.hidden_dim, config.hidden_dim),
-                nn.ReLU(),
-                nn.Linear(config.hidden_dim, config.latent_dim * 2),
-            )
+            nn.Linear(config.input_dim * config.seq_len, config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.latent_dim * 2),
+        )
         self.model_mean = nn.Linear(config.hidden_dim, config.output_dim)
         self.model_logvar = nn.Linear(config.hidden_dim, config.output_dim)
 
         self.mse = nn.MSELoss()
         self.loss = nn.GaussianNLLLoss()
         self.kl_multiplier = 0.001
-
-
 
     def forward(self, x, y=None):
 
@@ -90,7 +91,15 @@ class TDLGM(nn.Module):
                 ],
                 dim=1,
             )
-            xi = self.model_r(torch.cat([x_1.flatten(-2,-1),t,],dim=-1,))
+            xi = self.model_r(
+                torch.cat(
+                    [
+                        x_1.flatten(-2, -1),
+                        t,
+                    ],
+                    dim=-1,
+                )
+            )
         else:
             xi = self.model_p(x.flatten(-2, -1))
         xi_mean, xi_log_var = torch.chunk(xi, 2, dim=-1)
@@ -99,11 +108,8 @@ class TDLGM(nn.Module):
         h_t = t + self.model_g(z)
         pred_mean = self.model_mean(h_t)
         pred_logvar = self.model_logvar(h_t)
-        
+
         return pred_mean, pred_logvar, 0, 0, 0
-
-
-
 
     def reparameterize(self, mean, logvar):
         std = torch.exp(0.5 * logvar)
@@ -117,25 +123,22 @@ class TDLGM(nn.Module):
                 self.model_t.parameters(),
                 self.model_g.parameters(),
                 self.model_r.parameters(),
-                self.model_p.parameters()
+                self.model_p.parameters(),
             )
         )
 
     def gaussian_kl(
-    self,
-    q_mean,
-    q_logvar,
-    p_mean,
-    p_logvar,):
+        self,
+        q_mean,
+        q_logvar,
+        p_mean,
+        p_logvar,
+    ):
         q_var = torch.exp(q_logvar)
         p_var = torch.exp(p_logvar)
 
         kl = 0.5 * (
-            p_logvar
-            - q_logvar
-            + (q_var + (q_mean - p_mean).pow(2))
-              / p_var
-            - 1
+            p_logvar - q_logvar + (q_var + (q_mean - p_mean).pow(2)) / p_var - 1
         )
 
         return kl.sum(dim=-1).mean()
@@ -151,13 +154,14 @@ class TDLGM(nn.Module):
         q(z)=N(mean, RR^T)
 
         """
-        
-        return 0.5 * torch.sum(
-            torch.exp(logvar) + mean**2 - 1.0 - logvar,
-            dim=-1,
-        ).mean()
 
-
+        return (
+            0.5
+            * torch.sum(
+                torch.exp(logvar) + mean**2 - 1.0 - logvar,
+                dim=-1,
+            ).mean()
+        )
 
     def state_loss(
         self,
@@ -188,14 +192,7 @@ class TDLGM(nn.Module):
         return loss
 
     def compute_loss(
-        self,
-        y,
-        pred_mean,
-        pred_log_var,
-        mean_q,
-        logvar_q,
-        mean_p,
-        logvar_p
+        self, y, pred_mean, pred_log_var, mean_q, logvar_q, mean_p, logvar_p
     ):
 
         # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
@@ -203,7 +200,7 @@ class TDLGM(nn.Module):
         # TODO THIS ONLY SUPPORTS ONE STEP PREDICTION, NEED TO FIX FOR MULTI-STEP
         if y.ndim >= 3 and y.size(1) != 1:
             raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
-        
+
         if pred_mean.ndim == 2:
             pred_mean = pred_mean.unsqueeze(1)
             y = y[:, 0, :]
@@ -214,18 +211,19 @@ class TDLGM(nn.Module):
         )
 
         kl = 0.0
-        for mq, lvq, mp, lvp in zip(mean_q,logvar_q,mean_p,logvar_p):
-            kl += self.gaussian_kl(mq, lvq, mp, lvp,)
-
+        for mq, lvq, mp, lvp in zip(mean_q, logvar_q, mean_p, logvar_p):
+            kl += self.gaussian_kl(
+                mq,
+                lvq,
+                mp,
+                lvp,
+            )
 
         kl /= len(mean_q)
 
-        
         self.kl_multiplier *= 1.1
         self.kl_multiplier = min(self.kl_multiplier, 1.0)
-        return reconstruction + self.kl_multiplier* kl
-
-    
+        return reconstruction + self.kl_multiplier * kl
 
     def train_step(
         self,
@@ -241,17 +239,22 @@ class TDLGM(nn.Module):
         t, _ = self.model_t(x)
         t = t[:, -1, :]
 
-
         x_1 = torch.cat(
-        [
-            x,
-            y,
-        ],
+            [
+                x,
+                y,
+            ],
             dim=1,
         )
         xi_r = self.model_r(
-                torch.cat([x_1.flatten(-2,-1),t,],dim=-1,)
-                )
+            torch.cat(
+                [
+                    x_1.flatten(-2, -1),
+                    t,
+                ],
+                dim=-1,
+            )
+        )
 
         mean, logvar = torch.chunk(xi_r, 2, dim=-1)
 
@@ -259,43 +262,26 @@ class TDLGM(nn.Module):
         mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
 
         xi = xi_r
-            
-
 
         xi_mean, xi_log_var = torch.chunk(xi, 2, dim=-1)
         z = self.reparameterize(xi_mean, xi_log_var)
 
-
         h_t = t + self.model_g(z)
         pred_mean = self.model_mean(h_t)
         pred_logvar = self.model_logvar(h_t)
-   
+
         loss = self.compute_loss(
-            y,
-            pred_mean,
-            pred_logvar,
-            mean,
-            logvar,
-            mean_p,
-            logvar_p
+            y, pred_mean, pred_logvar, mean, logvar, mean_p, logvar_p
         )
 
         loss.backward()
-
 
         optimizer.step()
 
         return loss.item()
 
     def _compute_losses(
-            self,
-        y,
-        pred_mean,
-        pred_log_var,
-        mean_q,
-        logvar_q,
-        mean_p,
-        logvar_p
+        self, y, pred_mean, pred_log_var, mean_q, logvar_q, mean_p, logvar_p
     ):
 
         # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
@@ -314,35 +300,42 @@ class TDLGM(nn.Module):
         )
 
         kl = 0.0
-        for mq, lvq, mp, lvp in zip(mean_q,logvar_q,mean_p,logvar_p):
-            kl += self.gaussian_kl(mq, lvq, mp, lvp,)
-
+        for mq, lvq, mp, lvp in zip(mean_q, logvar_q, mean_p, logvar_p):
+            kl += self.gaussian_kl(
+                mq,
+                lvq,
+                mp,
+                lvp,
+            )
 
         kl /= len(mean_q)
 
-
-
-        return reconstruction, self.kl_multiplier*kl
+        return reconstruction, self.kl_multiplier * kl
 
     @torch.no_grad()
-    def compute_losses(self, x,y, prior=True):
+    def compute_losses(self, x, y, prior=True):
 
         # encode previous state
 
         t, _ = self.model_t(x)
         t = t[:, -1, :]
 
-
         x_1 = torch.cat(
-        [
-            x,
-            y,
-        ],
+            [
+                x,
+                y,
+            ],
             dim=1,
         )
         xi_r = self.model_r(
-                torch.cat([x_1.flatten(-2,-1),t,],dim=-1,)
-                )
+            torch.cat(
+                [
+                    x_1.flatten(-2, -1),
+                    t,
+                ],
+                dim=-1,
+            )
+        )
         mean, logvar = torch.chunk(xi_r, 2, dim=-1)
 
         xi_p = self.model_p(x.flatten(-2, -1))
@@ -352,53 +345,33 @@ class TDLGM(nn.Module):
             xi = xi_p
         else:
             xi = xi_r
-            
-
 
         xi_mean, xi_log_var = torch.chunk(xi, 2, dim=-1)
         z = self.reparameterize(xi_mean, xi_log_var)
 
-
         h_t = t + self.model_g(z)
         pred_mean = self.model_mean(h_t)
         pred_logvar = self.model_logvar(h_t)
-   
-
 
         rec, kl = self._compute_losses(
-            y,
-            pred_mean,
-            pred_logvar,
-            mean,
-            logvar,
-            mean_p,
-            logvar_p
+            y, pred_mean, pred_logvar, mean, logvar, mean_p, logvar_p
         )
-
 
         return rec.item(), kl.item(), 0
 
-
-
     @torch.no_grad()
-    def get_loss(
-        self,
-        x,
-        y,prior=True
-    ):
+    def get_loss(self, x, y, prior=True):
 
         self.eval()
-
 
         t, _ = self.model_t(x)
         t = t[:, -1, :]
 
-
         x_1 = torch.cat(
-        [
-            x,
-            y,
-        ],
+            [
+                x,
+                y,
+            ],
             dim=1,
         )
         xi_r = self.model_r(x_1.flatten(-2, -1))
@@ -411,17 +384,13 @@ class TDLGM(nn.Module):
             xi = xi_p
         else:
             xi = xi_r
-            
 
         xi_mean, xi_log_var = torch.chunk(xi, 2, dim=-1)
         z = self.reparameterize(xi_mean, xi_log_var)
 
-
         h_t = t + self.model_g(z)
         pred_mean = self.model_mean(h_t)
         pred_logvar = self.model_logvar(h_t)
-   
-
 
         return self.compute_loss(
             y,
@@ -433,145 +402,5 @@ class TDLGM(nn.Module):
             logvar_p,
         ).item()
 
-
     def nllLoss(self, mean, y, logvar):
-        return (
-            0.5
-            * (
-                torch.exp(-logvar)
-                * (y - mean).pow(2)
-                + logvar
-            )
-        ).mean()
-
-
-
-
-
-# ── Self Test ────────────────────────────────────────────────────────────────
-
-
-def main():
-
-
-    torch.manual_seed(42)
-
-    config = TDLGMConfig()
-
-    model = TDLGM(config).to(device)
-
-    optimizer = SGD(
-        model.get_parameters(),
-        lr=1e-3,
-    )
-
-    # ---------------------------------------------------------
-    # Create synthetic sequence prediction problem
-    #
-    # x_t  -> x_{t+1}
-    #
-    # ---------------------------------------------------------
-
-    batch_size = 64
-    seq_len = 3
-    input_dim = 10
-
-    x = torch.randn(
-        batch_size,
-        seq_len,
-        input_dim,
-        device=device,
-    )
-
-    # target next observation
-
-    y = torch.randn(
-        batch_size,
-        1,
-        input_dim,
-        device=device,
-    )
-
-    # construct x_1:
-    #
-    # [x_1,x_2,x_3,y]
-    #
-    # take future sequence
-
-    x_1 = torch.cat(
-        [
-            x,
-            y,
-        ],
-        dim=1,
-    )[:, 1:, :]
-
-    print(
-        "Input:",
-        x.shape,
-    )
-
-    print(
-        "Target:",
-        y.shape,
-    )
-
-    print(
-        "Next state:",
-        x_1.shape,
-    )
-
-    # ---------------------------------------------------------
-    # Initial loss
-    # ---------------------------------------------------------
-
-    before = model.get_loss(
-        x,
-        x_1,
-        y,
-    )
-
-    print(f"Loss before training: {before:.5f}")
-
-    # ---------------------------------------------------------
-    # Train
-    # ---------------------------------------------------------
-
-    model.train()
-
-    losses = []
-
-    for step in range(300):
-        loss = model.train_step(
-            x,
-            x_1,
-            y,
-            optimizer,
-        )
-
-        losses.append(loss)
-
-        if step % 50 == 0:
-            print(f"Step {step}: {loss:.5f}")
-
-    # ---------------------------------------------------------
-    # Final loss
-    # ---------------------------------------------------------
-
-    after = model.get_loss(
-        x,
-        x_1,
-        y,
-    )
-
-    print(f"Loss after training: {after:.5f}")
-
-    assert torch.isfinite(torch.tensor(after))
-
-    assert after < before, "Model did not improve"
-
-    print("Test passed.")
-
-
-if __name__ == "__main__":
-    main()
+        return (0.5 * (torch.exp(-logvar) * (y - mean).pow(2) + logvar)).mean()

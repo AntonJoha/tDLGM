@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-from dataclasses import fields, replace
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -119,7 +119,11 @@ def train_model(
             consistency_p /= train_batches
 
             logger.info("========== Epoch %03d =========", epoch + 1)
-            logger.info(" Train loss: %.5f: NLL on val set: %.5f", mean_loss, evaluate(model, val_loader))
+            logger.info(
+                " Train loss: %.5f: NLL on val set: %.5f",
+                mean_loss,
+                evaluate(model, val_loader),
+            )
             logger.info(
                 " Posterior: NLL %.5f: kl_loss %.5f: Cons_loss %.5f",
                 recon_loss,
@@ -135,7 +139,12 @@ def train_model(
 
         if trial is not None:
             val_loss = evaluate(model, val_loader)
-            logger.info("Trial %d: Epoch %03d: Validation loss %.5f", trial.number, epoch + 1, val_loss)
+            logger.info(
+                "Trial %d: Epoch %03d: Validation loss %.5f",
+                trial.number,
+                epoch + 1,
+                val_loss,
+            )
             trial.report(val_loss, epoch)
             if trial.should_prune() or val_loss > before * 2:
                 raise TrialPruned()
@@ -150,7 +159,9 @@ def train_model(
 
     after = evaluate(model, val_loader)
     if runtime.verbose:
-        logger.info("Validation loss after training: %.5f and before %.5f", after, before)
+        logger.info(
+            "Validation loss after training: %.5f and before %.5f", after, before
+        )
     if trial is None and after >= before:
         logger.warning(
             "Validation loss did not improve: before=%.5f after=%.5f",
@@ -212,7 +223,9 @@ def tune_hyperparameters(base_runtime: SeriesConfig) -> SeriesConfig:
 def train(base_runtime: SeriesConfig) -> Path:
     torch.manual_seed(base_runtime.seed)
     if base_runtime.verbose:
-        logger.info("Starting training with %s.", "tuning" if base_runtime.tune else "no tuning")
+        logger.info(
+            "Starting training with %s.", "tuning" if base_runtime.tune else "no tuning"
+        )
 
     runtime = tune_hyperparameters(base_runtime) if base_runtime.tune else base_runtime
     if base_runtime.verbose and not base_runtime.tune:
@@ -227,22 +240,76 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Train a tDLGM model on a time series dataset."
     )
-    parser.add_argument("--shampoo_code", action="store_true", help="Use the bundled shampoo sales dataset.")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--seq_len", type=int, default=12, help="Context length for the time series dataset")
-    parser.add_argument("--horizon", type=int, default=1, help="Horizon for the time series dataset")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
-    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
-    parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate for the optimizer")
-    parser.add_argument("--hidden_dim", type=int, default=32, help="Hidden size for the tDLGM model")
-    parser.add_argument("--latent_dim", type=int, default=8, help="Latent dimension for the tDLGM model")
-    parser.add_argument("--train_fraction", type=float, default=0.8, help="Fraction of the dataset to use for training")
-    parser.add_argument("--tune", action="store_true", help="Enable hyperparameter tuning with Optuna")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging output")
-    parser.add_argument("--baseline", action="store_true", help="Train a baseline model instead of tDLGM.")
-    parser.add_argument("--artifact_dir", type=str, default="artifacts/tdlgm", help="Directory to save checkpoints.")
-    parser.add_argument("--reduced_dataset", type=float, default=None, help="Fraction of the dataset to use for training")
-    parser.add_argument("--checkpoint_interval", type=int, default=10, help="Save a checkpoint every N epochs")
+    parser.add_argument(
+        "--shampoo_code",
+        action="store_true",
+        help="Use the bundled shampoo sales dataset.",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed for reproducibility"
+    )
+    parser.add_argument(
+        "--seq_len",
+        type=int,
+        default=12,
+        help="Context length for the time series dataset",
+    )
+    parser.add_argument(
+        "--horizon", type=int, default=1, help="Horizon for the time series dataset"
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=32, help="Batch size for training"
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=100, help="Number of training epochs"
+    )
+    parser.add_argument(
+        "--learning_rate",
+        type=float,
+        default=1e-3,
+        help="Learning rate for the optimizer",
+    )
+    parser.add_argument(
+        "--hidden_dim", type=int, default=32, help="Hidden size for the tDLGM model"
+    )
+    parser.add_argument(
+        "--latent_dim", type=int, default=8, help="Latent dimension for the tDLGM model"
+    )
+    parser.add_argument(
+        "--train_fraction",
+        type=float,
+        default=0.8,
+        help="Fraction of the dataset to use for training",
+    )
+    parser.add_argument(
+        "--tune", action="store_true", help="Enable hyperparameter tuning with Optuna"
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", help="Enable verbose logging output"
+    )
+    parser.add_argument(
+        "--baseline",
+        action="store_true",
+        help="Train a baseline model instead of tDLGM.",
+    )
+    parser.add_argument(
+        "--artifact_dir",
+        type=str,
+        default="artifacts/tdlgm",
+        help="Directory to save checkpoints.",
+    )
+    parser.add_argument(
+        "--reduced_dataset",
+        type=float,
+        default=None,
+        help="Fraction of the dataset to use for training",
+    )
+    parser.add_argument(
+        "--checkpoint_interval",
+        type=int,
+        default=10,
+        help="Save a checkpoint every N epochs",
+    )
     return parser.parse_args()
 
 
