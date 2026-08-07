@@ -47,7 +47,6 @@ def evaluate(model: TDLGM, loader: DataLoader) -> float:
 
 
 def build_runtime_model(runtime: SeriesConfig) -> tuple[TDLGM, Adam]:
-    runtime = replace(runtime, output_dim=runtime.horizon)
     model = TDLGM(runtime).to(device)
     if runtime.verbose:
         logger.info(
@@ -227,7 +226,6 @@ def train(base_runtime: SeriesConfig) -> Path:
             "Starting training with %s.", "tuning" if base_runtime.tune else "no tuning"
         )
 
-    base_runtime = replace(base_runtime, output_dim=base_runtime.horizon)
     runtime = tune_hyperparameters(base_runtime) if base_runtime.tune else base_runtime
     if base_runtime.verbose and not base_runtime.tune:
         logger.info("Skipping hyperparameter tuning.")

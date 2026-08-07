@@ -348,8 +348,15 @@ class TDLGM(nn.Module):
         mean_p_list,
         logvar_p_list,
     ):
+        target = y.squeeze(-1)
+        if pred_mean.shape != target.shape:
+            raise ValueError(
+                "prediction and target shapes must match "
+                "(output_dim should equal horizon): "
+                f"{pred_mean.shape} != {target.shape}"
+            )
 
-        rec = self.nllLoss(pred_mean, y[:, 0, :], pred_logvar.exp())
+        rec = self.nllLoss(pred_mean, target, pred_logvar.exp())
 
         kl = 0.0
         for mean_q, logvar_q, mean_p, logvar_p in zip(

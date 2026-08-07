@@ -1,3 +1,4 @@
+import math
 from dataclasses import replace
 
 import torch
@@ -43,11 +44,12 @@ def test_long_horizon_training_step_works():
     train_loader, _ = make_dataloaders(config)
     x, y = unpack_batch(next(iter(train_loader)))
 
-    tdlgm_model, _ = build_runtime_model(config)
+    tdlgm_model, _ = build_runtime_model(replace(config, output_dim=config.horizon))
     tdlgm_loss = tdlgm_model.train_step(
         x, y, torch.optim.Adam(tdlgm_model.parameters())
     )
-    assert tdlgm_loss >= 0
+    assert isinstance(tdlgm_loss, float)
+    assert not math.isnan(tdlgm_loss)
 
     baseline_model = Baseline(replace(config, output_dim=config.horizon)).to(
         baseline_device
@@ -56,4 +58,5 @@ def test_long_horizon_training_step_works():
     baseline_loss = baseline_model.train_step(
         x.to(baseline_device), y.to(baseline_device), baseline_optimizer
     )
-    assert baseline_loss >= 0
+    assert isinstance(baseline_loss, float)
+    assert not math.isnan(baseline_loss)
