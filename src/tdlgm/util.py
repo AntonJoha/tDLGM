@@ -322,13 +322,37 @@ class TimeSeriesDataset(Dataset):
         return x, y
 
 
+def _split_train_val_test(
+    dataset: Dataset,
+    train_fraction: float,
+    seed: int,
+) -> tuple[Dataset, Dataset, Dataset]:
+    if len(dataset) < 3:
+        raise ValueError("dataset must contain at least three windows")
+
+    # The clamp below keeps at least one window for validation and test.
+    train_size = int(len(dataset) * train_fraction)
+    train_size = min(max(1, train_size), len(dataset) - 2)
+    remainder = len(dataset) - train_size
+    val_size = max(1, remainder // 2)
+    test_size = remainder - val_size
+
+    generator = torch.Generator().manual_seed(seed)
+    return random_split(
+        dataset,
+        [train_size, val_size, test_size],
+        generator=generator,
+    )
+
+
 def get_dataset(
     tsf_file_path,
     context_length,
     horizon,
     batch_size=32,
-    train_test_split=0.8,
+    train_fraction=0.8,
     reduced_dataset=None,
+    seed: int = 42,
 ):
     tsf_file_path = Path(tsf_file_path)
     if not tsf_file_path.exists():
@@ -365,36 +389,44 @@ def get_dataset(
                 ]
             )
 
-    if len(dataset) < 2:
-        raise ValueError("dataset must contain at least two windows")
+    if len(dataset) < 3:
+        raise ValueError("dataset must contain at least three windows")
 
-    train_size = int(len(dataset) * train_test_split)
-    train_size = min(max(1, train_size), len(dataset) - 1)
-    test_size = len(dataset) - train_size
-
-    train_dataset, test_dataset = random_split(
+    train_dataset, val_dataset, test_dataset = _split_train_val_test(
         dataset,
-        [train_size, test_size],
+        train_fraction=train_fraction,
+        seed=seed,
     )
 
     if reduced_dataset is not None:
         train_size = max(1, int(reduced_dataset * len(train_dataset)))
+        val_size = max(1, int(reduced_dataset * len(val_dataset)))
         test_size = max(1, int(reduced_dataset * len(test_dataset)))
+        generator = torch.Generator().manual_seed(seed)
         train_dataset, _ = random_split(
             train_dataset,
             [train_size, len(train_dataset) - train_size],
+            generator=generator,
+        )
+        val_dataset, _ = random_split(
+            val_dataset,
+            [val_size, len(val_dataset) - val_size],
+            generator=generator,
         )
         test_dataset, _ = random_split(
             test_dataset,
             [test_size, len(test_dataset) - test_size],
+            generator=generator,
         )
 
     train_df = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_df = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    val_df = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_df = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     logger.info(f"Train dataset size: {len(train_dataset)}")
+    logger.info(f"Val dataset size: {len(val_dataset)}")
     logger.info(f"Test dataset size: {len(test_dataset)}")
-    return train_df, test_df
+    return train_df, val_df, test_df
 
 
 class WindowedSeriesDataset(Dataset):
@@ -431,27 +463,23 @@ def load_series(path: Path) -> torch.Tensor:
     return (series - mean) / std
 
 
-def get_shampoo_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoader]:
+def get_shampoo_dataloaders(
+    config: SeriesConfig,
+) -> tuple[DataLoader, DataLoader, DataLoader]:
     series = load_series(DATASET_PATH)
     dataset = WindowedSeriesDataset(series, config.seq_len, config.horizon)
 
-    if len(dataset) < 2:
-        raise ValueError("shampoo dataset is too small for train/validation split")
-
-    train_size = int(len(dataset) * config.train_fraction)
-    train_size = min(max(1, train_size), len(dataset) - 1)
-    val_size = len(dataset) - train_size
-
-    generator = torch.Generator().manual_seed(config.seed)
-    train_dataset, val_dataset = random_split(
+    train_dataset, val_dataset, test_dataset = _split_train_val_test(
         dataset,
-        [train_size, val_size],
-        generator=generator,
+        train_fraction=config.train_fraction,
+        seed=config.seed,
     )
 
     if config.reduced_dataset is not None:
         train_size = max(1, int(config.reduced_dataset * len(train_dataset)))
         val_size = max(1, int(config.reduced_dataset * len(val_dataset)))
+        test_size = max(1, int(config.reduced_dataset * len(test_dataset)))
+        generator = torch.Generator().manual_seed(config.seed)
         train_dataset, _ = random_split(
             train_dataset,
             [train_size, len(train_dataset) - train_size],
@@ -460,6 +488,11 @@ def get_shampoo_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoade
         val_dataset, _ = random_split(
             val_dataset,
             [val_size, len(val_dataset) - val_size],
+            generator=generator,
+        )
+        test_dataset, _ = random_split(
+            test_dataset,
+            [test_size, len(test_dataset) - test_size],
             generator=generator,
         )
 
@@ -475,11 +508,17 @@ def get_shampoo_dataloaders(config: SeriesConfig) -> tuple[DataLoader, DataLoade
         shuffle=False,
         drop_last=False,
     )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=config.batch_size,
+        shuffle=False,
+        drop_last=False,
+    )
 
-    return train_loader, val_loader
+    return train_loader, val_loader, test_loader
 
 
-def make_dataloaders(config: DataConfig) -> tuple[DataLoader, DataLoader]:
+def make_dataloaders(config: DataConfig) -> tuple[DataLoader, DataLoader, DataLoader]:
     dataset_path = Path(get_dataset_names()[0])
 
     if config.shampoo_code or not dataset_path.exists():
@@ -495,8 +534,9 @@ def make_dataloaders(config: DataConfig) -> tuple[DataLoader, DataLoader]:
         config.seq_len,
         config.horizon,
         config.batch_size,
-        train_test_split=config.train_fraction,
+        train_fraction=config.train_fraction,
         reduced_dataset=config.reduced_dataset,
+        seed=getattr(config, "seed", 42),
     )
 
 

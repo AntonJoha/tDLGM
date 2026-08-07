@@ -92,7 +92,7 @@ def train_model(
 
     model = Baseline(runtime).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=runtime.learning_rate)
-    train_loader, val_loader = make_dataloaders(runtime)
+    train_loader, val_loader, _test_loader = make_dataloaders(runtime)
     train_epochs = runtime.epochs if epochs is None else epochs
     checkpoint_interval = max(1, runtime.checkpoint_interval)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
