@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 
 from tdlgm.baseline import Baseline
 from tdlgm.main import unpack_batch
-from tdlgm.tDLGM import TDLGM, device
+from tdlgm.tDLGM_new import TDLGM, device
 from tdlgm.util import configure_logging, load_checkpoint, make_dataloaders
 
 

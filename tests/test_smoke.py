@@ -2,7 +2,8 @@ from dataclasses import replace
 
 import torch
 
-from tdlgm.baseline import Baseline, device as baseline_device
+from tdlgm.baseline import Baseline
+from tdlgm.baseline import device as baseline_device
 from tdlgm.main import build_runtime_model, unpack_batch
 from tdlgm.util import SeriesConfig, make_dataloaders
 
@@ -43,7 +44,9 @@ def test_long_horizon_training_step_works():
     x, y = unpack_batch(next(iter(train_loader)))
 
     tdlgm_model, _ = build_runtime_model(config)
-    tdlgm_loss = tdlgm_model.train_step(x, y, torch.optim.Adam(tdlgm_model.parameters()))
+    tdlgm_loss = tdlgm_model.train_step(
+        x, y, torch.optim.Adam(tdlgm_model.parameters())
+    )
     assert tdlgm_loss >= 0
 
     baseline_model = Baseline(replace(config, output_dim=config.horizon)).to(
