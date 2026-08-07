@@ -43,6 +43,16 @@ class Baseline(nn.Module):
         x, _ = self.lstm(x)
         return self.linear(x)[:, -1, :]
 
+    def _target(self, y: torch.Tensor, mean: torch.Tensor) -> torch.Tensor:
+        target = y.squeeze(-1)
+        if mean.shape != target.shape:
+            raise ValueError(
+                "prediction and target shapes must match "
+                "(output_dim should equal horizon): "
+                f"{mean.shape} != {target.shape}"
+            )
+        return target
+
     def train_step(
         self, x: torch.Tensor, y: torch.Tensor, optimizer: torch.optim.Optimizer
     ) -> float:
@@ -51,7 +61,7 @@ class Baseline(nn.Module):
         pred = self(x)
         mean = pred[:, : self.config.output_dim]
         logvar = pred[:, self.config.output_dim :]
-        loss = self.loss(mean, y, logvar.exp())
+        loss = self.loss(mean, self._target(y, mean), logvar.exp())
         loss.backward()
         optimizer.step()
         return float(loss)
@@ -61,7 +71,7 @@ class Baseline(nn.Module):
         pred = self(x)
         mean = pred[:, : self.config.output_dim]
         logvar = pred[:, self.config.output_dim :]
-        return float(self.loss(mean, y, logvar.exp()))
+        return float(self.loss(mean, self._target(y, mean), logvar.exp()))
 
 
 @torch.no_grad()
@@ -78,6 +88,7 @@ def train_model(
     save_to: Path | None = None,
 ) -> tuple[float, float]:
     torch.manual_seed(runtime.seed)
+    runtime = replace(runtime, output_dim=runtime.horizon)
 
     model = Baseline(runtime).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=runtime.learning_rate)

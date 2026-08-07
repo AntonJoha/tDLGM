@@ -18,6 +18,7 @@ class TDLGMConfig:
     output_dim: int = 10
     layers: int = 2
     seq_len: int = 3
+    horizon: int = 1
 
     # Training
     learning_rate: float = 1e-3
@@ -50,7 +51,7 @@ class TDLGM(nn.Module):
 
         self.input_posterior = nn.Sequential(
             nn.Linear(
-                config.input_dim * (1 + config.seq_len) ,
+                config.input_dim * (config.seq_len + config.horizon),
                 config.hidden_dim,
             ),
             nn.ReLU(),
@@ -60,11 +61,11 @@ class TDLGM(nn.Module):
         )
 
         self.input_prior = nn.Sequential(
-                nn.Linear(config.input_dim * config.seq_len, config.hidden_dim),
-                nn.ReLU(),
-                nn.Linear(config.hidden_dim, config.hidden_dim),
-                nn.ReLU(),
-                nn.Linear(config.hidden_dim, config.latent_dim * 2),
+            nn.Linear(config.input_dim * config.seq_len, config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.latent_dim * 2),
         )
 
         self.input_time_latent = nn.LSTM(
@@ -74,7 +75,6 @@ class TDLGM(nn.Module):
             batch_first=True,
         )
 
-        
         self.model_layers = self.make_tdlmg_layers(config)
 
         self.model_mean = nn.Linear(config.hidden_dim, config.output_dim)
@@ -84,10 +84,7 @@ class TDLGM(nn.Module):
         self.nllLoss = nn.GaussianNLLLoss()
         self.kl_multiplier = 1
 
-
-
     def make_tdlgm_layer(self, config):
-
 
         combinator = nn.Sequential(
             nn.Linear(config.hidden_dim * 2, config.hidden_dim),
@@ -95,7 +92,7 @@ class TDLGM(nn.Module):
             nn.Linear(config.hidden_dim, config.hidden_dim),
         )
 
-        generator =  nn.Sequential(
+        generator = nn.Sequential(
             nn.Linear(config.latent_dim, config.hidden_dim),
             nn.ReLU(),
             nn.Linear(config.hidden_dim, config.hidden_dim),
@@ -112,7 +109,7 @@ class TDLGM(nn.Module):
 
         posterior = nn.Sequential(
             nn.Linear(
-                config.input_dim * (1 + config.seq_len) ,
+                config.input_dim * (config.seq_len + config.horizon),
                 config.hidden_dim,
             ),
             nn.ReLU(),
@@ -128,15 +125,15 @@ class TDLGM(nn.Module):
             nn.ReLU(),
             nn.Linear(config.hidden_dim, config.latent_dim * 2),
         )
-        return nn.ModuleDict({
+        return nn.ModuleDict(
+            {
                 "combinator": combinator,
                 "time_latent": time_latent,
                 "generator": generator,
                 "posterior": posterior,
-                "prior": prior
-                })
-
-
+                "prior": prior,
+            }
+        )
 
     def make_tdlmg_layers(self, config):
         layers = nn.ModuleList()
@@ -170,7 +167,6 @@ class TDLGM(nn.Module):
         pred_logvar = self.model_logvar(h)
         return pred_mean, pred_logvar
 
-        
     def reparameterize(self, mean, logvar):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
@@ -251,8 +247,6 @@ class TDLGM(nn.Module):
 
         return loss
 
-
-
     def compute_loss(
         self,
         y,
@@ -265,7 +259,13 @@ class TDLGM(nn.Module):
     ):
 
         rec, kl = self._compute_losses(
-            y, pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list
+            y,
+            pred_mean,
+            pred_logvar,
+            mean_q_list,
+            logvar_q_list,
+            mean_p_list,
+            logvar_p_list,
         )
 
         return rec + kl
@@ -278,17 +278,15 @@ class TDLGM(nn.Module):
     ):
 
         optimizer.zero_grad()
-        
+
         # Encodings needed for KL divergence
         mean_q_list = []
         logvar_q_list = []
         mean_p_list = []
         logvar_p_list = []
 
-
         t, _ = self.input_time_latent(x)
         t = t[:, -1, :]
-        
 
         xi_q = self.input_posterior(torch.cat([x, y], dim=-2).flatten(-2, -1))
         mean_q, logvar_q = torch.chunk(xi_q, 2, dim=-1)
@@ -301,7 +299,9 @@ class TDLGM(nn.Module):
         mean_p_list.append(mean_p)
         logvar_p_list.append(logvar_p)
 
-        h = self.input_generator(self.reparameterize(mean_q, logvar_q)) # USE POSTERIOR DURING TRAINING
+        h = self.input_generator(
+            self.reparameterize(mean_q, logvar_q)
+        )  # USE POSTERIOR DURING TRAINING
 
         for layer in self.model_layers:
             t, _ = layer["time_latent"](x)
@@ -311,13 +311,11 @@ class TDLGM(nn.Module):
             mean_q, logvar_q = torch.chunk(xi_q, 2, dim=-1)
             mean_q_list.append(mean_q)
             logvar_q_list.append(logvar_q)
-            
 
             xi_p = layer["prior"](x.flatten(-2, -1))
             mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
             mean_p_list.append(mean_p)
             logvar_p_list.append(logvar_p)
-
 
             z = self.reparameterize(mean_q, logvar_q)
             h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
@@ -325,7 +323,13 @@ class TDLGM(nn.Module):
         pred_mean = self.model_mean(h)
         pred_logvar = self.model_logvar(h)
         loss = self.compute_loss(
-            y, pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list
+            y,
+            pred_mean,
+            pred_logvar,
+            mean_q_list,
+            logvar_q_list,
+            mean_p_list,
+            logvar_p_list,
         )
 
         loss.backward()
@@ -335,25 +339,40 @@ class TDLGM(nn.Module):
         return loss.item()
 
     def _compute_losses(
-            self, y, pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list,):
+        self,
+        y,
+        pred_mean,
+        pred_logvar,
+        mean_q_list,
+        logvar_q_list,
+        mean_p_list,
+        logvar_p_list,
+    ):
+        target = y.squeeze(-1)
+        if pred_mean.shape != target.shape:
+            raise ValueError(
+                "prediction and target shapes must match "
+                "(output_dim should equal horizon): "
+                f"{pred_mean.shape} != {target.shape}"
+            )
 
-        rec = self.nllLoss(pred_mean, y[:,0,:], pred_logvar.exp())
+        rec = self.nllLoss(pred_mean, target, pred_logvar.exp())
 
         kl = 0.0
-        for mean_q, logvar_q, mean_p, logvar_p in zip(mean_q_list, logvar_q_list, mean_p_list, logvar_p_list):
+        for mean_q, logvar_q, mean_p, logvar_p in zip(
+            mean_q_list, logvar_q_list, mean_p_list, logvar_p_list
+        ):
             kl += self.gaussian_kl(mean_q, logvar_q, mean_p, logvar_p)
         return rec, kl * self.kl_multiplier
 
     @torch.no_grad()
     def compute_losses(self, x, y, prior=True):
 
-        
         # Encodings needed for KL divergence
         mean_q_list = []
         logvar_q_list = []
         mean_p_list = []
         logvar_p_list = []
-
 
         t, _ = self.input_time_latent(x)
         t = t[:, -1, :]
@@ -370,7 +389,6 @@ class TDLGM(nn.Module):
         logvar_p_list.append(logvar_p)
 
         if prior:
-
             h = self.input_generator(self.reparameterize(mean_p, logvar_p))
         else:
             h = self.input_generator(self.reparameterize(mean_q, logvar_q))
@@ -379,12 +397,10 @@ class TDLGM(nn.Module):
             t, _ = layer["time_latent"](x)
             t = t[:, -1, :]
 
-
             xi_q = layer["posterior"](torch.cat([x, y], dim=-2).flatten(-2, -1))
             mean_q, logvar_q = torch.chunk(xi_q, 2, dim=-1)
             mean_q_list.append(mean_q)
             logvar_q_list.append(logvar_q)
-            
 
             xi_p = layer["prior"](x.flatten(-2, -1))
             mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
@@ -401,8 +417,13 @@ class TDLGM(nn.Module):
         pred_mean = self.model_mean(h)
         pred_logvar = self.model_logvar(h)
         rec, kl = self._compute_losses(
-            y, pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list
+            y,
+            pred_mean,
+            pred_logvar,
+            mean_q_list,
+            logvar_q_list,
+            mean_p_list,
+            logvar_p_list,
         )
 
         return rec.item(), kl.item(), 0
-

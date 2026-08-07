@@ -31,8 +31,6 @@ def unpack_batch(batch: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = x.unsqueeze(-1)
     if y.ndim == 2:
         y = y.unsqueeze(-1)
-    if y.size(1) != 1:
-        raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
     return x.to(device), y.to(device)
 
 
@@ -43,7 +41,7 @@ def evaluate(model: TDLGM, loader: DataLoader) -> float:
     for batch in loader:
         x, y = unpack_batch(batch)
         mean, logvar, *_ = model(x)
-        losses.append(float(model.nllLoss(mean, y[:, 0, :], logvar.exp())))
+        losses.append(float(model.nllLoss(mean, y.squeeze(-1), logvar.exp())))
     model.train()
     return sum(losses) / max(1, len(losses))
 
@@ -66,6 +64,7 @@ def train_model(
     save_to: Path | None = None,
 ) -> tuple[float, float]:
     torch.manual_seed(runtime.seed)
+    runtime = replace(runtime, output_dim=runtime.horizon)
 
     model, optimizer = build_runtime_model(runtime)
     train_loader, val_loader = make_dataloaders(runtime)
