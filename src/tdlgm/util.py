@@ -330,6 +330,7 @@ def _split_train_val_test(
     if len(dataset) < 3:
         raise ValueError("dataset must contain at least three windows")
 
+    # The clamp below keeps at least one window for validation and test.
     train_size = int(len(dataset) * train_fraction)
     train_size = min(max(1, train_size), len(dataset) - 2)
     remainder = len(dataset) - train_size
@@ -401,20 +402,21 @@ def get_dataset(
         train_size = max(1, int(reduced_dataset * len(train_dataset)))
         val_size = max(1, int(reduced_dataset * len(val_dataset)))
         test_size = max(1, int(reduced_dataset * len(test_dataset)))
+        generator = torch.Generator().manual_seed(seed)
         train_dataset, _ = random_split(
             train_dataset,
             [train_size, len(train_dataset) - train_size],
-            generator=torch.Generator().manual_seed(seed),
+            generator=generator,
         )
         val_dataset, _ = random_split(
             val_dataset,
             [val_size, len(val_dataset) - val_size],
-            generator=torch.Generator().manual_seed(seed),
+            generator=generator,
         )
         test_dataset, _ = random_split(
             test_dataset,
             [test_size, len(test_dataset) - test_size],
-            generator=torch.Generator().manual_seed(seed),
+            generator=generator,
         )
 
     train_df = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -477,20 +479,21 @@ def get_shampoo_dataloaders(
         train_size = max(1, int(config.reduced_dataset * len(train_dataset)))
         val_size = max(1, int(config.reduced_dataset * len(val_dataset)))
         test_size = max(1, int(config.reduced_dataset * len(test_dataset)))
+        generator = torch.Generator().manual_seed(config.seed)
         train_dataset, _ = random_split(
             train_dataset,
             [train_size, len(train_dataset) - train_size],
-            generator=torch.Generator().manual_seed(config.seed),
+            generator=generator,
         )
         val_dataset, _ = random_split(
             val_dataset,
             [val_size, len(val_dataset) - val_size],
-            generator=torch.Generator().manual_seed(config.seed),
+            generator=generator,
         )
         test_dataset, _ = random_split(
             test_dataset,
             [test_size, len(test_dataset) - test_size],
-            generator=torch.Generator().manual_seed(config.seed),
+            generator=generator,
         )
 
     train_loader = DataLoader(
