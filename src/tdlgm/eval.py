@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 import torch
@@ -9,7 +10,8 @@ from torch.utils.data import DataLoader
 
 from tdlgm.baseline import Baseline
 from tdlgm.main import unpack_batch
-from tdlgm.tDLGM import TDLGM, device
+from tdlgm.tDLGM import TDLGM as LegacyTDLGM
+from tdlgm.tDLGM_new import TDLGM, device
 from tdlgm.util import configure_logging, load_checkpoint, make_dataloaders
 
 
@@ -37,7 +39,7 @@ def evaluate_baseline(model: nn.Module, loader: DataLoader) -> float:
         pred = model(x)
         mean = pred[:, : model.config.output_dim]
         logvar = pred[:, model.config.output_dim :]
-        losses.append(float(model.loss(mean, y, logvar.exp())))
+        losses.append(float(model.loss(mean, y.squeeze(-1), logvar.exp())))
     return sum(losses) / max(1, len(losses))
 
 
@@ -48,16 +50,20 @@ def evaluate_tdlgm(model: nn.Module, loader: DataLoader) -> float:
     for batch in loader:
         x, y = unpack_batch(batch)
         mean, logvar, *_ = model(x)
-        losses.append(float(model.nllLoss(mean, y[:, 0, :], logvar)))
+        losses.append(float(model.nllLoss(mean, y.squeeze(-1), logvar.exp())))
     return sum(losses) / max(1, len(losses))
 
 
 def benchmark_model(model_path: Path) -> None:
-    runtime, model_config, model_state = load_checkpoint(model_path)
+    runtime, model_config, model_state, model_class = load_checkpoint(model_path)
     runtime.reduced_dataset = 0.2
+    runtime = replace(runtime, output_dim=runtime.horizon)
 
     if runtime.model_name == "tdlgm":
-        model = TDLGM(model_config).to(device)
+        if model_class == "tdlgm.tDLGM_new.TDLGM":
+            model = TDLGM(model_config).to(device)
+        else:
+            model = LegacyTDLGM(model_config).to(device)
         model.load_state_dict(model_state)
         _, val_loader = make_dataloaders(runtime)
         print(f"Validation loss: {evaluate_tdlgm(model, val_loader):.5f}")

@@ -244,6 +244,7 @@ def checkpoint_payload(model: nn.Module, runtime: SeriesConfig) -> dict[str, obj
     return {
         "config": asdict(runtime),
         "model_config": asdict(model.config),
+        "model_class": f"{model.__class__.__module__}.{model.__class__.__name__}",
         "model_state_dict": model.state_dict(),
     }
 
@@ -285,12 +286,13 @@ def checkpoint_filename(suffix: str) -> str:
 
 def load_checkpoint(
     checkpoint_path: Path,
-) -> tuple[SeriesConfig, SeriesConfig, dict[str, torch.Tensor]]:
+) -> tuple[SeriesConfig, SeriesConfig, dict[str, torch.Tensor], str | None]:
     checkpoint = torch.load(checkpoint_path, map_location=device)
     runtime = SeriesConfig(**checkpoint["config"])
     model_config = SeriesConfig(**checkpoint["model_config"])
     model_state = checkpoint["model_state_dict"]
-    return runtime, model_config, model_state
+    model_class = checkpoint.get("model_class")
+    return runtime, model_config, model_state, model_class
 
 
 class TimeSeriesDataset(Dataset):

@@ -7,7 +7,7 @@ benchmark:
 	python -m tdlgm.eval --verbose 
 
 baseline:
-	python -m tdlgm.main --verbose --baseline --reduced_dataset 0.001 --artifact_dir artifacts_dev/baseline_tune
+	python -m tdlgm.main --verbose --baseline --reduced_dataset 0.001 --artifact_dir artifacts/baseline_tune --horizon 100
 	
 
 
@@ -26,7 +26,7 @@ tune:
 	python -m tdlgm.main --verbose --tune --reduced_dataset 0.002
 
 main:
-	python -m tdlgm.main --verbose --reduced_dataset 0.005 --learning_rate 0.0001
+	python -m tdlgm.main --verbose --reduced_dataset 0.005 --learning_rate 0.0001 --horizon 100
 
 rvae_main:
 	python -m tdlgm.main_rvae --verbose --reduced_dataset 0.001 --learning_rate 0.01 

@@ -1,6 +1,7 @@
+import random
 from dataclasses import dataclass
 from itertools import chain
-import random
+
 import torch
 from torch import nn
 from torch.optim import SGD
