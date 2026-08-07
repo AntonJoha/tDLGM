@@ -70,9 +70,12 @@ def train_model(
     train_loader, val_loader, _test_loader = make_dataloaders(runtime)
     train_epochs = runtime.epochs if epochs is None else epochs
     checkpoint_interval = max(1, runtime.checkpoint_interval)
+    early_stopping_patience = 10
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
     before = evaluate(model, val_loader)
+    best_val = before
+    epochs_without_improvement = 0
     if runtime.verbose:
         logger.info("Validation loss before training: %.5f", before)
 
@@ -107,6 +110,8 @@ def train_model(
             kl_loss_p += t_kl_loss_p
             consistency_p += t_consistency_p
 
+        val_loss = evaluate(model, val_loader)
+
         if runtime.verbose:
             train_batches = max(1, len(train_loader))
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
@@ -121,7 +126,7 @@ def train_model(
             logger.info(
                 " Train loss: %.5f: NLL on val set: %.5f",
                 mean_loss,
-                evaluate(model, val_loader),
+                val_loss,
             )
             logger.info(
                 " Posterior: NLL %.5f: kl_loss %.5f: Cons_loss %.5f",
@@ -134,10 +139,23 @@ def train_model(
                 recon_loss_p,
                 kl_loss_p,
                 consistency_p,
-            )
+                )
+
+        if val_loss < best_val:
+            best_val = val_loss
+            epochs_without_improvement = 0
+            if save_to is not None:
+                saved_path = save_checkpoint(
+                    model,
+                    runtime,
+                    save_to / checkpoint_filename("best"),
+                )
+                if runtime.verbose:
+                    logger.info("Saved checkpoint to %s", saved_path)
+        else:
+            epochs_without_improvement += 1
 
         if trial is not None:
-            val_loss = evaluate(model, val_loader)
             logger.info(
                 "Trial %d: Epoch %03d: Validation loss %.5f",
                 trial.number,
@@ -155,6 +173,14 @@ def train_model(
             saved_path = save_checkpoint(model, runtime, checkpoint_path)
             if runtime.verbose:
                 logger.info("Saved checkpoint to %s", saved_path)
+
+        if epochs_without_improvement >= early_stopping_patience:
+            if runtime.verbose:
+                logger.info(
+                    "Early stopping after %d epochs without val NLL improvement.",
+                    early_stopping_patience,
+                )
+            break
 
     after = evaluate(model, val_loader)
     if runtime.verbose:

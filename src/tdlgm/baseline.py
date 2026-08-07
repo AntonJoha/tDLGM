@@ -95,9 +95,12 @@ def train_model(
     train_loader, val_loader, _test_loader = make_dataloaders(runtime)
     train_epochs = runtime.epochs if epochs is None else epochs
     checkpoint_interval = max(1, runtime.checkpoint_interval)
+    early_stopping_patience = 10
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
     before = evaluate(model, val_loader)
+    best_val = before
+    epochs_without_improvement = 0
     if runtime.verbose:
         logger.info("Validation loss before training: %.5f", before)
 
@@ -112,17 +115,32 @@ def train_model(
         for x, y in train_loader:
             epoch_losses.append(model.train_step(x, y, optimizer))
 
+        val_loss = evaluate(model, val_loader)
+
         if runtime.verbose:
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
             logger.info(
                 "Epoch %03d: Loss %.5f  Val loss %.5f",
                 epoch + 1,
                 mean_loss,
-                evaluate(model, val_loader),
+                val_loss,
             )
 
+        if val_loss < best_val:
+            best_val = val_loss
+            epochs_without_improvement = 0
+            if save_to is not None:
+                saved_path = save_checkpoint(
+                    model,
+                    runtime,
+                    save_to / checkpoint_filename("best"),
+                )
+                if runtime.verbose:
+                    logger.info("Saved checkpoint to %s", saved_path)
+        else:
+            epochs_without_improvement += 1
+
         if trial is not None:
-            val_loss = evaluate(model, val_loader)
             trial.report(val_loss, epoch)
             if trial.should_prune():
                 raise TrialPruned()
@@ -137,6 +155,14 @@ def train_model(
             )
             if runtime.verbose:
                 logger.info("Saved checkpoint to %s", saved_path)
+
+        if epochs_without_improvement >= early_stopping_patience:
+            if runtime.verbose:
+                logger.info(
+                    "Early stopping after %d epochs without val NLL improvement.",
+                    early_stopping_patience,
+                )
+            break
 
     after = evaluate(model, val_loader)
     if runtime.verbose:
