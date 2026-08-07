@@ -1,4 +1,5 @@
 import math
+from collections import deque
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from tdlgm.baseline import Baseline
 from tdlgm.baseline import device as baseline_device
 from tdlgm.main import build_runtime_model, unpack_batch
 from tdlgm.main import train_model as tdlgm_train_model
-from tdlgm.util import SeriesConfig, make_dataloaders
+from tdlgm.util import SeriesConfig, checkpoint_filename, make_dataloaders
 
 
 def test_shampoo_dataloaders_return_batches():
@@ -101,7 +102,11 @@ def test_tdlgm_early_stopping_saves_best_checkpoint(monkeypatch, tmp_path):
     )
     batch = (torch.zeros(1, 5), torch.zeros(1, 1))
     save_calls: list[Path] = []
-    val_losses = iter([1.0, 0.5, *([0.6] * 10), 0.6])
+    expected_train_steps = config.early_stopping_patience + 1
+    expected_eval_calls = config.early_stopping_patience + 3
+    # pre-training eval, one improving epoch, patience flat epochs, final eval
+    val_losses = deque([1.0, 0.5] + [0.6] * config.early_stopping_patience + [0.6])
+    evaluate_calls = {"count": 0}
 
     fake_model = _FakeTrainer(replace(config, output_dim=config.horizon))
     optimizer = torch.optim.Adam(fake_model.parameters())
@@ -114,7 +119,12 @@ def test_tdlgm_early_stopping_saves_best_checkpoint(monkeypatch, tmp_path):
         "tdlgm.main.make_dataloaders",
         lambda runtime: ([batch], [batch], [batch]),
     )
-    monkeypatch.setattr("tdlgm.main.evaluate", lambda model, loader: next(val_losses))
+
+    def fake_evaluate(model, loader):
+        evaluate_calls["count"] += 1
+        return val_losses.popleft()
+
+    monkeypatch.setattr("tdlgm.main.evaluate", fake_evaluate)
     monkeypatch.setattr(
         "tdlgm.main.save_checkpoint",
         lambda model, runtime, checkpoint_path: (
@@ -124,8 +134,10 @@ def test_tdlgm_early_stopping_saves_best_checkpoint(monkeypatch, tmp_path):
 
     tdlgm_train_model(config, save_to=tmp_path)
 
-    assert fake_model.train_steps == 11
-    assert any(path.name.startswith("checkpoint_epochbest") for path in save_calls)
+    assert fake_model.train_steps == expected_train_steps
+    assert not val_losses
+    assert evaluate_calls["count"] == expected_eval_calls
+    assert any(path.name.startswith(checkpoint_filename("best")) for path in save_calls)
 
 
 def test_baseline_early_stopping_saves_best_checkpoint(monkeypatch, tmp_path):
@@ -140,7 +152,11 @@ def test_baseline_early_stopping_saves_best_checkpoint(monkeypatch, tmp_path):
     )
     batch = (torch.zeros(1, 5), torch.zeros(1, 1))
     save_calls: list[Path] = []
-    val_losses = iter([1.0, 0.5, *([0.6] * 10), 0.6])
+    expected_train_steps = config.early_stopping_patience + 1
+    expected_eval_calls = config.early_stopping_patience + 3
+    # pre-training eval, one improving epoch, patience flat epochs, final eval
+    val_losses = deque([1.0, 0.5] + [0.6] * config.early_stopping_patience + [0.6])
+    evaluate_calls = {"count": 0}
 
     fake_model = _FakeTrainer(replace(config, output_dim=config.horizon))
 
@@ -154,11 +170,12 @@ def test_baseline_early_stopping_saves_best_checkpoint(monkeypatch, tmp_path):
         "make_dataloaders",
         lambda runtime: ([batch], [batch], [batch]),
     )
-    monkeypatch.setattr(
-        baseline_module,
-        "evaluate",
-        lambda model, loader: next(val_losses),
-    )
+
+    def fake_evaluate(model, loader):
+        evaluate_calls["count"] += 1
+        return val_losses.popleft()
+
+    monkeypatch.setattr(baseline_module, "evaluate", fake_evaluate)
     monkeypatch.setattr(
         baseline_module,
         "save_checkpoint",
@@ -169,5 +186,7 @@ def test_baseline_early_stopping_saves_best_checkpoint(monkeypatch, tmp_path):
 
     baseline_module.train_model(config, save_to=tmp_path)
 
-    assert fake_model.train_steps == 11
-    assert any(path.name.startswith("checkpoint_epochbest") for path in save_calls)
+    assert fake_model.train_steps == expected_train_steps
+    assert not val_losses
+    assert evaluate_calls["count"] == expected_eval_calls
+    assert any(path.name.startswith(checkpoint_filename("best")) for path in save_calls)
