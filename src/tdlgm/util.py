@@ -43,6 +43,7 @@ class DataConfig:
     train_fraction: float = 0.8
     artifact_dir: str = "artifacts_dev/tdlgm"
     checkpoint_interval: int = 10
+    early_stopping_patience: int = 10
     run_id: str | None = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     model_name: str = "tdlgm"
 
