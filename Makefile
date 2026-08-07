@@ -28,7 +28,7 @@ tune:
 	python -m tdlgm.main --verbose --tune --reduced_dataset 0.001 --horizon 100
 
 main:
-	python -m tdlgm.main --verbose --reduced_dataset 0.005 --learning_rate 0.0001 --horizon 100 --epochs 10
+	python -m tdlgm.main --verbose --reduced_dataset 0.005 --learning_rate 0.0001 --horizon 100 --epochs 1000
 
 rvae_main:
 	python -m tdlgm.main_rvae --verbose --reduced_dataset 0.001 --learning_rate 0.01 
@@ -49,7 +49,7 @@ util:
 	python -m tdlgm.util --verbose 
 
 eval:
-	python -m tdlgm.eval --verbose  --checkpoint_path artifacts/tdlgm/checkpoint_epochfinal_20260807-131345.pt
+	python -m tdlgm.eval --verbose  --checkpoint_path artifacts/tdlgm/checkpoint_epochfinal_20260807-140956.pt
 
 lint:
 	./lint.sh
