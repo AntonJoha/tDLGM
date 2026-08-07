@@ -10,9 +10,10 @@ from torch.utils.data import DataLoader
 
 from tdlgm.baseline import Baseline
 from tdlgm.main import unpack_batch
-from tdlgm.tDLGM import TDLGM as LegacyTDLGM
 from tdlgm.tDLGM_new import TDLGM, device
 from tdlgm.util import configure_logging, load_checkpoint, make_dataloaders
+import logging
+logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint_path",
         type=Path,
-        default=Path("artifacts/tdlgm/checkpoint.pt"),
+        default=Path("artifacts/tdlgm/checkpoint_epochfinal_20260807-105536.pt"),
         help="Path to a saved checkpoint",
     )
     parser.add_argument(
@@ -45,6 +46,8 @@ def evaluate_baseline(model: nn.Module, loader: DataLoader) -> float:
 
 @torch.no_grad()
 def evaluate_tdlgm(model: nn.Module, loader: DataLoader) -> float:
+    logger.info("Evaluating tDLGM model...")
+
     model.eval()
     losses = []
     for batch in loader:
@@ -56,14 +59,11 @@ def evaluate_tdlgm(model: nn.Module, loader: DataLoader) -> float:
 
 def benchmark_model(model_path: Path) -> None:
     runtime, model_config, model_state, model_class = load_checkpoint(model_path)
-    runtime.reduced_dataset = 0.2
+    runtime.reduced_dataset = 0.01 # SHOULD ALWAYS EVALUATE ON WHOLE DATASET BUT FOR NOW WE'LL USE REDUCED DATASET FOR SPEED
     runtime = replace(runtime, output_dim=runtime.horizon)
 
     if runtime.model_name == "tdlgm":
-        if model_class == "tdlgm.tDLGM_new.TDLGM":
-            model = TDLGM(model_config).to(device)
-        else:
-            model = LegacyTDLGM(model_config).to(device)
+        model = TDLGM(model_config).to(device)
         model.load_state_dict(model_state)
         _, val_loader = make_dataloaders(runtime)
         print(f"Validation loss: {evaluate_tdlgm(model, val_loader):.5f}")

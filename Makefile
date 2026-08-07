@@ -7,9 +7,11 @@ benchmark:
 	python -m tdlgm.eval --verbose 
 
 baseline:
-	python -m tdlgm.main --verbose --baseline --reduced_dataset 0.001 --artifact_dir artifacts/baseline_tune --horizon 100
+	python -m tdlgm.main --verbose --baseline --reduced_dataset 0.001 --artifact_dir artifacts/baseline_tune --horizon 100 --epochs 10
 	
 
+eval_baseline:
+	python -m tdlgm.eval --verbose  --checkpoint_path artifacts/baseline_tune/checkpoint_epochfinal_20260807-115314.pt
 
 baseline_shampoo_tune:
 	python -m tdlgm.main --verbose --baseline --shampoo_code --artifact_dir artifacts/baseline_tune --tune
@@ -23,10 +25,10 @@ baseline_tune:
 	python -m tdlgm.main --verbose --baseline --tune --reduced_dataset 0.002 --artifact_dir artifacts/baseline_tune
 
 tune:
-	python -m tdlgm.main --verbose --tune --reduced_dataset 0.002
+	python -m tdlgm.main --verbose --tune --reduced_dataset 0.001 --horizon 100
 
 main:
-	python -m tdlgm.main --verbose --reduced_dataset 0.005 --learning_rate 0.0001 --horizon 100
+	python -m tdlgm.main --verbose --reduced_dataset 0.005 --learning_rate 0.0001 --horizon 100 --epochs 10
 
 rvae_main:
 	python -m tdlgm.main_rvae --verbose --reduced_dataset 0.001 --learning_rate 0.01 
