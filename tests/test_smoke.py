@@ -5,11 +5,11 @@ from pathlib import Path
 import torch
 from torch import nn
 
+from tdlgm import baseline as baseline_module
 from tdlgm.baseline import Baseline
 from tdlgm.baseline import device as baseline_device
-from tdlgm.main import build_runtime_model, train_model as tdlgm_train_model
-from tdlgm.main import unpack_batch
-from tdlgm import baseline as baseline_module
+from tdlgm.main import build_runtime_model, unpack_batch
+from tdlgm.main import train_model as tdlgm_train_model
 from tdlgm.util import SeriesConfig, make_dataloaders
 
 
@@ -117,8 +117,9 @@ def test_tdlgm_early_stopping_saves_best_checkpoint(monkeypatch, tmp_path):
     monkeypatch.setattr("tdlgm.main.evaluate", lambda model, loader: next(val_losses))
     monkeypatch.setattr(
         "tdlgm.main.save_checkpoint",
-        lambda model, runtime, checkpoint_path: save_calls.append(checkpoint_path)
-        or checkpoint_path.with_suffix(".pt"),
+        lambda model, runtime, checkpoint_path: (
+            save_calls.append(checkpoint_path) or checkpoint_path.with_suffix(".pt")
+        ),
     )
 
     tdlgm_train_model(config, save_to=tmp_path)
@@ -161,8 +162,9 @@ def test_baseline_early_stopping_saves_best_checkpoint(monkeypatch, tmp_path):
     monkeypatch.setattr(
         baseline_module,
         "save_checkpoint",
-        lambda model, runtime, checkpoint_path: save_calls.append(checkpoint_path)
-        or checkpoint_path.with_suffix(".pt"),
+        lambda model, runtime, checkpoint_path: (
+            save_calls.append(checkpoint_path) or checkpoint_path.with_suffix(".pt")
+        ),
     )
 
     baseline_module.train_model(config, save_to=tmp_path)

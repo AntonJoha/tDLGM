@@ -70,7 +70,7 @@ def train_model(
     train_loader, val_loader, _test_loader = make_dataloaders(runtime)
     train_epochs = runtime.epochs if epochs is None else epochs
     checkpoint_interval = max(1, runtime.checkpoint_interval)
-    early_stopping_patience = 10
+    early_stopping_patience = runtime.early_stopping_patience
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
     before = evaluate(model, val_loader)
@@ -139,7 +139,7 @@ def train_model(
                 recon_loss_p,
                 kl_loss_p,
                 consistency_p,
-                )
+            )
 
         if val_loss < best_val:
             best_val = val_loss
