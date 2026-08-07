@@ -35,13 +35,13 @@ DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
 
 @dataclass(slots=True)
 class DataConfig:
-    seq_len: int = 12
+    seq_len: int = 50
     batch_size: int = 8
     horizon: int = 1
     shampoo_code: bool = False
     reduced_dataset: float | None = None
     train_fraction: float = 0.8
-    artifact_dir: str = "artifacts/tdlgm"
+    artifact_dir: str = "artifacts_dev/tdlgm"
     checkpoint_interval: int = 10
     early_stopping_patience: int = 10
     run_id: str | None = time.strftime("%Y%m%d-%H%M%S", time.localtime())

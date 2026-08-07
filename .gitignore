@@ -3,7 +3,8 @@ __pycache__
 *zip
 *tsf
 artifacts
+artifacts_dev
 *egg-info
 
-.ipynb_checkpoints/*
+*ipynb_checkpoints/*
 .venv/*
