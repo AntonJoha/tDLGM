@@ -1,4 +1,3 @@
-import csv
 import json
 import logging
 import time
@@ -298,7 +297,7 @@ def load_checkpoint(
 
 class TimeSeriesDataset(Dataset):
     def __init__(self, series, context_length, horizon, mean, std):
-        self.series = torch.tensor(series, dtype=torch.float32)
+        self.series = torch.as_tensor(series, dtype=torch.float32)
         self.context_length = context_length
         self.horizon = horizon
 
@@ -306,20 +305,20 @@ class TimeSeriesDataset(Dataset):
         # Compute statistics from the dataset
         self.mean = mean
         self.std = std
+        window_length = context_length + horizon
+        self.windows = (
+            self.series.unfold(0, window_length, 1)
+            if len(self.series) >= window_length
+            else self.series.new_empty((0, window_length))
+        )
 
     def __len__(self):
-        return max(0, len(self.series) - self.context_length - self.horizon + 1)
+        return self.windows.size(0)
 
     def __getitem__(self, idx):
-        x = (self.series[idx : idx + self.context_length] - self.mean) / self.std
-
-        y = (
-            self.series[
-                idx + self.context_length : idx + self.context_length + self.horizon
-            ]
-            - self.mean
-        ) / self.std
-
+        window = self.windows[idx]
+        x = (window[: self.context_length] - self.mean) / self.std
+        y = (window[self.context_length :] - self.mean) / self.std
         return x, y
 
 
@@ -363,32 +362,21 @@ def get_dataset(
     )
 
     ## normalize data
-    all_values = []
-    for row in df["series_value"]:
-        all_values.extend(row)
-    all_values = np.array(all_values)
+    all_values = np.concatenate([np.asarray(row, dtype=np.float32) for row in df["series_value"]])
     mean = np.mean(all_values)
     std = np.std(all_values)
 
-    dataset = None
-    for row in df["series_value"]:
-        if dataset is None:
-            dataset = TimeSeriesDataset(
-                row, context_length=context_length, horizon=horizon, mean=mean, std=std
-            )
-        else:
-            dataset = ConcatDataset(
-                [
-                    dataset,
-                    TimeSeriesDataset(
-                        row,
-                        context_length=context_length,
-                        horizon=horizon,
-                        mean=mean,
-                        std=std,
-                    ),
-                ]
-            )
+    datasets = [
+        TimeSeriesDataset(
+            row,
+            context_length=context_length,
+            horizon=horizon,
+            mean=mean,
+            std=std,
+        )
+        for row in df["series_value"]
+    ]
+    dataset = _concat_series_datasets(datasets)
 
     if len(dataset) < 3:
         raise ValueError("dataset must contain at least three windows")
@@ -434,31 +422,30 @@ class WindowedSeriesDataset(Dataset):
     def __init__(self, series: torch.Tensor, seq_len: int, horizon: int = 1) -> None:
         if series.ndim != 1:
             raise ValueError("series must be 1D")
-        if len(series) <= seq_len:
-            raise ValueError("series must be longer than seq_len")
+        if len(series) < seq_len + horizon:
+            raise ValueError("series must be longer than seq_len + horizon")
 
         self.series = series
         self.seq_len = seq_len
         self.horizon = horizon
+        window_length = seq_len + horizon
+        self.windows = self.series.unfold(0, window_length, 1)
 
     def __len__(self) -> int:
-        return max(0, len(self.series) - self.seq_len - self.horizon + 1)
+        return self.windows.size(0)
 
     def __getitem__(self, index: int) -> torch.Tensor:
-        sequence = self.series[index : index + self.seq_len]
-        target = self.series[index + self.seq_len : index + self.seq_len + self.horizon]
+        window = self.windows[index]
+        sequence = window[: self.seq_len]
+        target = window[self.seq_len :]
         return sequence, target
 
 
 def load_series(path: Path) -> torch.Tensor:
-    values = []
-
-    with path.open(newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            values.append(float(row["sales"]))
-
-    series = torch.tensor(values, dtype=torch.float32)
+    series = torch.as_tensor(
+        pd.read_csv(path, usecols=["sales"])["sales"].to_numpy(),
+        dtype=torch.float32,
+    )
     mean = series.mean()
     std = series.std(unbiased=False).clamp_min(1e-6)
     return (series - mean) / std
@@ -517,6 +504,12 @@ def get_shampoo_dataloaders(
     )
 
     return train_loader, val_loader, test_loader
+
+
+def _concat_series_datasets(datasets: list[Dataset]) -> Dataset:
+    if len(datasets) == 1:
+        return datasets[0]
+    return ConcatDataset(datasets)
 
 
 def make_dataloaders(config: DataConfig) -> tuple[DataLoader, DataLoader, DataLoader]:

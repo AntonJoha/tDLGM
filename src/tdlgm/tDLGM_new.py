@@ -84,6 +84,14 @@ class TDLGM(nn.Module):
         self.nllLoss = nn.GaussianNLLLoss()
         self.kl_multiplier = 1
 
+    @staticmethod
+    def _flatten_time_series(x: torch.Tensor) -> torch.Tensor:
+        return x.flatten(-2, -1)
+
+    @staticmethod
+    def _split_latent(xi: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return torch.chunk(xi, 2, dim=-1)
+
     def make_tdlgm_layer(self, config):
 
         combinator = nn.Sequential(
@@ -142,25 +150,18 @@ class TDLGM(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-
-        t, _ = self.input_time_latent(x)
-        t = t[:, -1, :]
-
-        xi_p = self.input_prior(x.flatten(-2, -1))
-        mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
+        x_flat = self._flatten_time_series(x)
+        xi_p = self.input_prior(x_flat)
+        mean_p, logvar_p = self._split_latent(xi_p)
         h = self.input_generator(self.reparameterize(mean_p, logvar_p))
 
         for layer in self.model_layers:
             t, _ = layer["time_latent"](x)
             t = t[:, -1, :]
 
-            xi_p = layer["prior"](x.flatten(-2, -1))
-            mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
-
-            xi = xi_p
-
-            xi_mean, xi_log_var = torch.chunk(xi, 2, dim=-1)
-            z = self.reparameterize(xi_mean, xi_log_var)
+            xi_p = layer["prior"](x_flat)
+            mean_p, logvar_p = self._split_latent(xi_p)
+            z = self.reparameterize(mean_p, logvar_p)
 
             h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
         pred_mean = self.model_mean(h)
@@ -285,14 +286,14 @@ class TDLGM(nn.Module):
         mean_p_list = []
         logvar_p_list = []
 
-        t, _ = self.input_time_latent(x)
-        t = t[:, -1, :]
+        x_flat = self._flatten_time_series(x)
+        xy_flat = torch.cat([x, y], dim=-2).flatten(-2, -1)
 
-        xi_q = self.input_posterior(torch.cat([x, y], dim=-2).flatten(-2, -1))
-        mean_q, logvar_q = torch.chunk(xi_q, 2, dim=-1)
+        xi_q = self.input_posterior(xy_flat)
+        mean_q, logvar_q = self._split_latent(xi_q)
 
-        xi_p = self.input_prior(x.flatten(-2, -1))
-        mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
+        xi_p = self.input_prior(x_flat)
+        mean_p, logvar_p = self._split_latent(xi_p)
 
         mean_q_list.append(mean_q)
         logvar_q_list.append(logvar_q)
@@ -307,13 +308,13 @@ class TDLGM(nn.Module):
             t, _ = layer["time_latent"](x)
             t = t[:, -1, :]
 
-            xi_q = layer["posterior"](torch.cat([x, y], dim=-2).flatten(-2, -1))
-            mean_q, logvar_q = torch.chunk(xi_q, 2, dim=-1)
+            xi_q = layer["posterior"](xy_flat)
+            mean_q, logvar_q = self._split_latent(xi_q)
             mean_q_list.append(mean_q)
             logvar_q_list.append(logvar_q)
 
-            xi_p = layer["prior"](x.flatten(-2, -1))
-            mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
+            xi_p = layer["prior"](x_flat)
+            mean_p, logvar_p = self._split_latent(xi_p)
             mean_p_list.append(mean_p)
             logvar_p_list.append(logvar_p)
 
@@ -374,14 +375,14 @@ class TDLGM(nn.Module):
         mean_p_list = []
         logvar_p_list = []
 
-        t, _ = self.input_time_latent(x)
-        t = t[:, -1, :]
+        x_flat = self._flatten_time_series(x)
+        xy_flat = torch.cat([x, y], dim=-2).flatten(-2, -1)
 
-        xi_q = self.input_posterior(torch.cat([x, y], dim=-2).flatten(-2, -1))
-        mean_q, logvar_q = torch.chunk(xi_q, 2, dim=-1)
+        xi_q = self.input_posterior(xy_flat)
+        mean_q, logvar_q = self._split_latent(xi_q)
 
-        xi_p = self.input_prior(x.flatten(-2, -1))
-        mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
+        xi_p = self.input_prior(x_flat)
+        mean_p, logvar_p = self._split_latent(xi_p)
 
         mean_q_list.append(mean_q)
         logvar_q_list.append(logvar_q)
@@ -397,13 +398,13 @@ class TDLGM(nn.Module):
             t, _ = layer["time_latent"](x)
             t = t[:, -1, :]
 
-            xi_q = layer["posterior"](torch.cat([x, y], dim=-2).flatten(-2, -1))
-            mean_q, logvar_q = torch.chunk(xi_q, 2, dim=-1)
+            xi_q = layer["posterior"](xy_flat)
+            mean_q, logvar_q = self._split_latent(xi_q)
             mean_q_list.append(mean_q)
             logvar_q_list.append(logvar_q)
 
-            xi_p = layer["prior"](x.flatten(-2, -1))
-            mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
+            xi_p = layer["prior"](x_flat)
+            mean_p, logvar_p = self._split_latent(xi_p)
             mean_p_list.append(mean_p)
             logvar_p_list.append(logvar_p)
 
