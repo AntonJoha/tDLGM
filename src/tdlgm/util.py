@@ -41,7 +41,7 @@ class DataConfig:
     shampoo_code: bool = False
     reduced_dataset: float | None = None
     train_fraction: float = 0.8
-    artifact_dir: str = "artifacts/tdlgm"
+    artifact_dir: str = "artifacts_dev/tdlgm"
     checkpoint_interval: int = 10
     run_id: str | None = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     model_name: str = "tdlgm"

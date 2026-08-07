@@ -7,7 +7,7 @@ benchmark:
 	python -m tdlgm.eval --verbose 
 
 baseline:
-	python -m tdlgm.main --verbose --baseline --reduced_dataset 0.001 --artifact_dir artifacts/baseline_tune
+	python -m tdlgm.main --verbose --baseline --reduced_dataset 0.001 --artifact_dir artifacts_dev/baseline_tune
 	
 
 
