@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 import torch
@@ -37,7 +38,7 @@ def evaluate_baseline(model: nn.Module, loader: DataLoader) -> float:
         pred = model(x)
         mean = pred[:, : model.config.output_dim]
         logvar = pred[:, model.config.output_dim :]
-        losses.append(float(model.loss(mean, y, logvar.exp())))
+        losses.append(float(model.loss(mean, y.squeeze(-1), logvar.exp())))
     return sum(losses) / max(1, len(losses))
 
 
@@ -48,13 +49,14 @@ def evaluate_tdlgm(model: nn.Module, loader: DataLoader) -> float:
     for batch in loader:
         x, y = unpack_batch(batch)
         mean, logvar, *_ = model(x)
-        losses.append(float(model.nllLoss(mean, y[:, 0, :], logvar)))
+        losses.append(float(model.nllLoss(mean, y.squeeze(-1), logvar.exp())))
     return sum(losses) / max(1, len(losses))
 
 
 def benchmark_model(model_path: Path) -> None:
     runtime, model_config, model_state = load_checkpoint(model_path)
     runtime.reduced_dataset = 0.2
+    runtime = replace(runtime, output_dim=runtime.horizon)
 
     if runtime.model_name == "tdlgm":
         model = TDLGM(model_config).to(device)
