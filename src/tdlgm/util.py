@@ -507,6 +507,8 @@ def get_shampoo_dataloaders(
 
 
 def _concat_series_datasets(datasets: list[Dataset]) -> Dataset:
+    if not datasets:
+        raise ValueError("dataset must contain at least one series")
     if len(datasets) == 1:
         return datasets[0]
     return ConcatDataset(datasets)
