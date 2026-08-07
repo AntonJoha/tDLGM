@@ -35,7 +35,7 @@ DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
 
 @dataclass(slots=True)
 class DataConfig:
-    seq_len: int = 12
+    seq_len: int = 50
     batch_size: int = 8
     horizon: int = 1
     shampoo_code: bool = False

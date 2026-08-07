@@ -11,7 +11,7 @@ baseline:
 	
 
 eval_baseline:
-	python -m tdlgm.eval --verbose  --checkpoint_path artifacts/baseline_tune/checkpoint_epochfinal_20260807-115314.pt
+	python -m tdlgm.eval --verbose  --checkpoint_path artifacts/baseline_tune/checkpoint_epochfinal_20260807-131328.pt
 
 baseline_shampoo_tune:
 	python -m tdlgm.main --verbose --baseline --shampoo_code --artifact_dir artifacts/baseline_tune --tune
@@ -49,7 +49,7 @@ util:
 	python -m tdlgm.util --verbose 
 
 eval:
-	python -m tdlgm.eval --verbose 
+	python -m tdlgm.eval --verbose  --checkpoint_path artifacts/tdlgm/checkpoint_epochfinal_20260807-131345.pt
 
 lint:
 	./lint.sh
