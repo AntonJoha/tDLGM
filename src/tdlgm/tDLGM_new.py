@@ -40,13 +40,7 @@ class TDLGM(nn.Module):
 
         self.config = config
 
-        self.model_t = nn.LSTM(
-            input_size=config.input_dim,
-            hidden_size=config.hidden_dim,
-            num_layers=config.layers,
-            batch_first=True,
-        )
-        self.model_g = nn.Sequential(
+        self.input_generator = nn.Sequential(
             nn.Linear(config.latent_dim, config.hidden_dim),
             nn.ReLU(),
             nn.Linear(config.hidden_dim, config.hidden_dim),
@@ -54,9 +48,9 @@ class TDLGM(nn.Module):
             nn.Linear(config.hidden_dim, config.hidden_dim),
         )
 
-        self.model_r = nn.Sequential(
+        self.input_posterior = nn.Sequential(
             nn.Linear(
-                config.input_dim * (1 + config.seq_len) + config.hidden_dim,
+                config.input_dim * (1 + config.seq_len) ,
                 config.hidden_dim,
             ),
             nn.ReLU(),
@@ -65,52 +59,118 @@ class TDLGM(nn.Module):
             nn.Linear(config.hidden_dim, config.latent_dim * 2),
         )
 
-        self.model_p = nn.Sequential(
+        self.input_prior = nn.Sequential(
+                nn.Linear(config.input_dim * config.seq_len, config.hidden_dim),
+                nn.ReLU(),
+                nn.Linear(config.hidden_dim, config.hidden_dim),
+                nn.ReLU(),
+                nn.Linear(config.hidden_dim, config.latent_dim * 2),
+        )
+
+        self.input_time_latent = nn.LSTM(
+            input_size=config.input_dim,
+            hidden_size=config.hidden_dim,
+            num_layers=config.layers,
+            batch_first=True,
+        )
+
+        
+        self.model_layers = self.make_tdlmg_layers(config)
+
+        self.model_mean = nn.Linear(config.hidden_dim, config.output_dim)
+        self.model_logvar = nn.Linear(config.hidden_dim, config.output_dim)
+
+        self.mse = nn.MSELoss()
+        self.nllLoss = nn.GaussianNLLLoss()
+        self.kl_multiplier = 1
+
+
+
+    def make_tdlgm_layer(self, config):
+
+
+        combinator = nn.Sequential(
+            nn.Linear(config.hidden_dim * 2, config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+        )
+
+        generator =  nn.Sequential(
+            nn.Linear(config.latent_dim, config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+        )
+
+        time_latent = nn.LSTM(
+            input_size=config.input_dim,
+            hidden_size=config.hidden_dim,
+            num_layers=config.layers,
+            batch_first=True,
+        )
+
+        posterior = nn.Sequential(
+            nn.Linear(
+                config.input_dim * (1 + config.seq_len) ,
+                config.hidden_dim,
+            ),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.latent_dim * 2),
+        )
+
+        prior = nn.Sequential(
             nn.Linear(config.input_dim * config.seq_len, config.hidden_dim),
             nn.ReLU(),
             nn.Linear(config.hidden_dim, config.hidden_dim),
             nn.ReLU(),
             nn.Linear(config.hidden_dim, config.latent_dim * 2),
         )
-        self.model_mean = nn.Linear(config.hidden_dim, config.output_dim)
-        self.model_logvar = nn.Linear(config.hidden_dim, config.output_dim)
+        return nn.ModuleDict({
+                "combinator": combinator,
+                "time_latent": time_latent,
+                "generator": generator,
+                "posterior": posterior,
+                "prior": prior
+                })
 
-        self.mse = nn.MSELoss()
-        self.loss = nn.GaussianNLLLoss()
-        self.kl_multiplier = 0.001
 
-    def forward(self, x, y=None):
 
-        t, _ = self.model_t(x)
+    def make_tdlmg_layers(self, config):
+        layers = nn.ModuleList()
+        for _ in range(config.tdlgm_layers):
+            layers.append(self.make_tdlgm_layer(config))
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+
+        t, _ = self.input_time_latent(x)
         t = t[:, -1, :]
-        if y is not None:
-            x_1 = torch.cat(
-                [
-                    x[:, 1:, :],
-                    y,
-                ],
-                dim=1,
-            )
-            xi = self.model_r(
-                torch.cat(
-                    [
-                        x_1.flatten(-2, -1),
-                        t,
-                    ],
-                    dim=-1,
-                )
-            )
-        else:
-            xi = self.model_p(x.flatten(-2, -1))
-        xi_mean, xi_log_var = torch.chunk(xi, 2, dim=-1)
-        z = self.reparameterize(xi_mean, xi_log_var)
 
-        h_t = t + self.model_g(z)
-        pred_mean = self.model_mean(h_t)
-        pred_logvar = self.model_logvar(h_t)
+        xi_p = self.input_prior(x.flatten(-2, -1))
+        mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
+        h = self.input_generator(self.reparameterize(mean_p, logvar_p))
 
-        return pred_mean, pred_logvar, 0, 0, 0
+        for layer in self.model_layers:
+            t, _ = layer["time_latent"](x)
+            t = t[:, -1, :]
 
+            xi_p = layer["prior"](x.flatten(-2, -1))
+            mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
+
+            xi = xi_p
+
+            xi_mean, xi_log_var = torch.chunk(xi, 2, dim=-1)
+            z = self.reparameterize(xi_mean, xi_log_var)
+
+            h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
+        pred_mean = self.model_mean(h)
+        pred_logvar = self.model_logvar(h)
+        return pred_mean, pred_logvar
+
+        
     def reparameterize(self, mean, logvar):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
@@ -191,39 +251,24 @@ class TDLGM(nn.Module):
 
         return loss
 
+
+
     def compute_loss(
-        self, y, pred_mean, pred_log_var, mean_q, logvar_q, mean_p, logvar_p
+        self,
+        y,
+        pred_mean,
+        pred_logvar,
+        mean_q_list,
+        logvar_q_list,
+        mean_p_list,
+        logvar_p_list,
     ):
 
-        # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
-
-        # TODO THIS ONLY SUPPORTS ONE STEP PREDICTION, NEED TO FIX FOR MULTI-STEP
-        if y.ndim >= 3 and y.size(1) != 1:
-            raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
-
-        if pred_mean.ndim == 2:
-            pred_mean = pred_mean.unsqueeze(1)
-            y = y[:, 0, :]
-        y_flat = y.reshape_as(pred_mean)
-        reconstruction = (
-            0.5
-            * (pred_log_var + (y_flat - pred_mean).pow(2) / pred_log_var.exp()).mean()
+        rec, kl = self._compute_losses(
+            y, pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list
         )
 
-        kl = 0.0
-        for mq, lvq, mp, lvp in zip(mean_q, logvar_q, mean_p, logvar_p):
-            kl += self.gaussian_kl(
-                mq,
-                lvq,
-                mp,
-                lvp,
-            )
-
-        kl /= len(mean_q)
-
-        self.kl_multiplier *= 1.1
-        self.kl_multiplier = min(self.kl_multiplier, 1.0)
-        return reconstruction + self.kl_multiplier * kl
+        return rec + kl
 
     def train_step(
         self,
@@ -233,45 +278,54 @@ class TDLGM(nn.Module):
     ):
 
         optimizer.zero_grad()
+        
+        # Encodings needed for KL divergence
+        mean_q_list = []
+        logvar_q_list = []
+        mean_p_list = []
+        logvar_p_list = []
 
-        # encode previous state
 
-        t, _ = self.model_t(x)
+        t, _ = self.input_time_latent(x)
         t = t[:, -1, :]
+        
 
-        x_1 = torch.cat(
-            [
-                x,
-                y,
-            ],
-            dim=1,
-        )
-        xi_r = self.model_r(
-            torch.cat(
-                [
-                    x_1.flatten(-2, -1),
-                    t,
-                ],
-                dim=-1,
-            )
-        )
+        xi_q = self.input_posterior(torch.cat([x, y], dim=-2).flatten(-2, -1))
+        mean_q, logvar_q = torch.chunk(xi_q, 2, dim=-1)
 
-        mean, logvar = torch.chunk(xi_r, 2, dim=-1)
-
-        xi_p = self.model_p(x.flatten(-2, -1))
+        xi_p = self.input_prior(x.flatten(-2, -1))
         mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
 
-        xi = xi_r
+        mean_q_list.append(mean_q)
+        logvar_q_list.append(logvar_q)
+        mean_p_list.append(mean_p)
+        logvar_p_list.append(logvar_p)
 
-        xi_mean, xi_log_var = torch.chunk(xi, 2, dim=-1)
-        z = self.reparameterize(xi_mean, xi_log_var)
+        h = self.input_generator(self.reparameterize(mean_q, logvar_q)) # USE POSTERIOR DURING TRAINING
 
-        h_t = t + self.model_g(z)
-        pred_mean = self.model_mean(h_t)
-        pred_logvar = self.model_logvar(h_t)
+        for layer in self.model_layers:
+            t, _ = layer["time_latent"](x)
+            t = t[:, -1, :]
 
+            xi_q = layer["posterior"](torch.cat([x, y], dim=-2).flatten(-2, -1))
+            mean_q, logvar_q = torch.chunk(xi_q, 2, dim=-1)
+            mean_q_list.append(mean_q)
+            logvar_q_list.append(logvar_q)
+            
+
+            xi_p = layer["prior"](x.flatten(-2, -1))
+            mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
+            mean_p_list.append(mean_p)
+            logvar_p_list.append(logvar_p)
+
+
+            z = self.reparameterize(mean_q, logvar_q)
+            h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
+
+        pred_mean = self.model_mean(h)
+        pred_logvar = self.model_logvar(h)
         loss = self.compute_loss(
-            y, pred_mean, pred_logvar, mean, logvar, mean_p, logvar_p
+            y, pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list
         )
 
         loss.backward()
@@ -281,126 +335,74 @@ class TDLGM(nn.Module):
         return loss.item()
 
     def _compute_losses(
-        self, y, pred_mean, pred_log_var, mean_q, logvar_q, mean_p, logvar_p
-    ):
+            self, y, pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list,):
 
-        # Gaussian NLL: 0.5 * (log_var + (y - mean)^2 / var)
-
-        # TODO THIS ONLY SUPPORTS ONE STEP PREDICTION, NEED TO FIX FOR MULTI-STEP
-        if y.ndim >= 3 and y.size(1) != 1:
-            raise ValueError(f"tDLGM currently supports horizon=1; got {y.size(1)}")
-
-        if pred_mean.ndim == 2:
-            pred_mean = pred_mean.unsqueeze(1)
-            y = y[:, 0, :]
-        y_flat = y.reshape_as(pred_mean)
-        reconstruction = (
-            0.5
-            * (pred_log_var + (y_flat - pred_mean).pow(2) / pred_log_var.exp()).mean()
-        )
+        rec = self.nllLoss(pred_mean, y[:,0,:], pred_logvar.exp())
 
         kl = 0.0
-        for mq, lvq, mp, lvp in zip(mean_q, logvar_q, mean_p, logvar_p):
-            kl += self.gaussian_kl(
-                mq,
-                lvq,
-                mp,
-                lvp,
-            )
-
-        kl /= len(mean_q)
-
-        return reconstruction, self.kl_multiplier * kl
+        for mean_q, logvar_q, mean_p, logvar_p in zip(mean_q_list, logvar_q_list, mean_p_list, logvar_p_list):
+            kl += self.gaussian_kl(mean_q, logvar_q, mean_p, logvar_p)
+        return rec, kl * self.kl_multiplier
 
     @torch.no_grad()
     def compute_losses(self, x, y, prior=True):
 
-        # encode previous state
+        
+        # Encodings needed for KL divergence
+        mean_q_list = []
+        logvar_q_list = []
+        mean_p_list = []
+        logvar_p_list = []
 
-        t, _ = self.model_t(x)
+
+        t, _ = self.input_time_latent(x)
         t = t[:, -1, :]
 
-        x_1 = torch.cat(
-            [
-                x,
-                y,
-            ],
-            dim=1,
-        )
-        xi_r = self.model_r(
-            torch.cat(
-                [
-                    x_1.flatten(-2, -1),
-                    t,
-                ],
-                dim=-1,
-            )
-        )
-        mean, logvar = torch.chunk(xi_r, 2, dim=-1)
+        xi_q = self.input_posterior(torch.cat([x, y], dim=-2).flatten(-2, -1))
+        mean_q, logvar_q = torch.chunk(xi_q, 2, dim=-1)
 
-        xi_p = self.model_p(x.flatten(-2, -1))
+        xi_p = self.input_prior(x.flatten(-2, -1))
         mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
 
+        mean_q_list.append(mean_q)
+        logvar_q_list.append(logvar_q)
+        mean_p_list.append(mean_p)
+        logvar_p_list.append(logvar_p)
+
         if prior:
-            xi = xi_p
+
+            h = self.input_generator(self.reparameterize(mean_p, logvar_p))
         else:
-            xi = xi_r
+            h = self.input_generator(self.reparameterize(mean_q, logvar_q))
 
-        xi_mean, xi_log_var = torch.chunk(xi, 2, dim=-1)
-        z = self.reparameterize(xi_mean, xi_log_var)
+        for layer in self.model_layers:
+            t, _ = layer["time_latent"](x)
+            t = t[:, -1, :]
 
-        h_t = t + self.model_g(z)
-        pred_mean = self.model_mean(h_t)
-        pred_logvar = self.model_logvar(h_t)
 
+            xi_q = layer["posterior"](torch.cat([x, y], dim=-2).flatten(-2, -1))
+            mean_q, logvar_q = torch.chunk(xi_q, 2, dim=-1)
+            mean_q_list.append(mean_q)
+            logvar_q_list.append(logvar_q)
+            
+
+            xi_p = layer["prior"](x.flatten(-2, -1))
+            mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
+            mean_p_list.append(mean_p)
+            logvar_p_list.append(logvar_p)
+
+            if prior:
+                z = self.reparameterize(mean_p, logvar_p)
+            else:
+                z = self.reparameterize(mean_q, logvar_q)
+
+            h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
+
+        pred_mean = self.model_mean(h)
+        pred_logvar = self.model_logvar(h)
         rec, kl = self._compute_losses(
-            y, pred_mean, pred_logvar, mean, logvar, mean_p, logvar_p
+            y, pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list
         )
 
         return rec.item(), kl.item(), 0
 
-    @torch.no_grad()
-    def get_loss(self, x, y, prior=True):
-
-        self.eval()
-
-        t, _ = self.model_t(x)
-        t = t[:, -1, :]
-
-        x_1 = torch.cat(
-            [
-                x,
-                y,
-            ],
-            dim=1,
-        )
-        xi_r = self.model_r(x_1.flatten(-2, -1))
-        mean, logvar = torch.chunk(xi_r, 2, dim=-1)
-
-        xi_p = self.model_p(x.flatten(-2, -1))
-        mean_p, logvar_p = torch.chunk(xi_p, 2, dim=-1)
-
-        if prior:
-            xi = xi_p
-        else:
-            xi = xi_r
-
-        xi_mean, xi_log_var = torch.chunk(xi, 2, dim=-1)
-        z = self.reparameterize(xi_mean, xi_log_var)
-
-        h_t = t + self.model_g(z)
-        pred_mean = self.model_mean(h_t)
-        pred_logvar = self.model_logvar(h_t)
-
-        return self.compute_loss(
-            y,
-            pred_mean,
-            pred_logvar,
-            mean,
-            logvar,
-            mean_p,
-            logvar_p,
-        ).item()
-
-    def nllLoss(self, mean, y, logvar):
-        return (0.5 * (torch.exp(-logvar) * (y - mean).pow(2) + logvar)).mean()

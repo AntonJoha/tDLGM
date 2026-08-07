@@ -26,7 +26,7 @@ tune:
 	python -m tdlgm.main --verbose --tune --reduced_dataset 0.002
 
 main:
-	python -m tdlgm.main --verbose --reduced_dataset 0.002 --learning_rate 0.01
+	python -m tdlgm.main --verbose --reduced_dataset 0.005 --learning_rate 0.0001
 
 rvae_main:
 	python -m tdlgm.main_rvae --verbose --reduced_dataset 0.001 --learning_rate 0.01 
