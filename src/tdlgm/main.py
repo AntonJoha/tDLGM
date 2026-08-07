@@ -12,7 +12,7 @@ from optuna.exceptions import TrialPruned
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
-from tdlgm.tDLGM import TDLGM, device
+from tdlgm.tDLGM_new import TDLGM, device
 from tdlgm.util import (
     SeriesConfig,
     checkpoint_filename,
@@ -43,7 +43,7 @@ def evaluate(model: TDLGM, loader: DataLoader) -> float:
     for batch in loader:
         x, y = unpack_batch(batch)
         mean, logvar, *_ = model(x)
-        losses.append(float(model.nllLoss(mean, y[:, 0, :], logvar)))
+        losses.append(float(model.nllLoss(mean, y[:, 0, :], logvar.exp())))
     model.train()
     return sum(losses) / max(1, len(losses))
 

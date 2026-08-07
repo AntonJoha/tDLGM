@@ -67,6 +67,7 @@ class SeriesConfig(BaselineConfig):
     # Architecture overrides
     hidden_dim: int = 32
     latent_dim: int = 8
+    tdlgm_layers: int = 2
 
     # Training overrides
     batch_size: int = 64
