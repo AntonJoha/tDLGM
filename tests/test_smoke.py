@@ -18,18 +18,23 @@ def test_shampoo_dataloaders_return_batches():
         reduced_dataset=0.2,
     )
 
-    train_loader, val_loader = make_dataloaders(config)
+    train_loader, val_loader, test_loader = make_dataloaders(config)
 
     train_batch = next(iter(train_loader))
     val_batch = next(iter(val_loader))
 
     x_train, y_train = train_batch
+    test_batch = next(iter(test_loader))
+
     x_val, y_val = val_batch
+    x_test, y_test = test_batch
 
     assert x_train.ndim == 2
     assert y_train.ndim == 2
     assert x_val.ndim == 2
     assert y_val.ndim == 2
+    assert x_test.ndim == 2
+    assert y_test.ndim == 2
 
 
 def test_long_horizon_training_step_works():
@@ -41,7 +46,7 @@ def test_long_horizon_training_step_works():
         reduced_dataset=0.2,
     )
 
-    train_loader, _ = make_dataloaders(config)
+    train_loader, _, _ = make_dataloaders(config)
     x, y = unpack_batch(next(iter(train_loader)))
 
     tdlgm_model, _ = build_runtime_model(replace(config, output_dim=config.horizon))

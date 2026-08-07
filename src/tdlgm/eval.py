@@ -65,13 +65,13 @@ def benchmark_model(model_path: Path) -> None:
         else:
             model = LegacyTDLGM(model_config).to(device)
         model.load_state_dict(model_state)
-        _, val_loader = make_dataloaders(runtime)
-        print(f"Validation loss: {evaluate_tdlgm(model, val_loader):.5f}")
+        _, _, test_loader = make_dataloaders(runtime)
+        print(f"Test loss: {evaluate_tdlgm(model, test_loader):.5f}")
     elif runtime.model_name == "baseline":
         model = Baseline(runtime).to(device)
         model.load_state_dict(model_state)
-        _, val_loader = make_dataloaders(runtime)
-        print(f"Validation loss: {evaluate_baseline(model, val_loader):.5f}")
+        _, _, test_loader = make_dataloaders(runtime)
+        print(f"Test loss: {evaluate_baseline(model, test_loader):.5f}")
 
 
 def main() -> None:
