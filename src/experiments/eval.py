@@ -10,10 +10,13 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from tdlgm.baseline import Baseline
-from tdlgm.main import unpack_batch
-from tdlgm.model import TDLGM, device
-from tdlgm.util import configure_logging, load_checkpoint, make_dataloaders
+from experiments.baseline import Baseline
+from experiments.main import unpack_batch
+from tdlgm import TDLGM
+from experiments.util import configure_logging, load_checkpoint
+from data.data import make_dataloaders
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 logger = logging.getLogger(__name__)
 

@@ -11,14 +11,14 @@ from optuna.exceptions import TrialPruned
 from torch import nn
 from torch.utils.data import DataLoader
 
-from tdlgm.util import (
+from experiments.util import (
     BaselineConfig,
     SeriesConfig,
     checkpoint_filename,
-    make_dataloaders,
     save_checkpoint,
     save_config,
 )
+from data.data import make_dataloaders
 
 logger = logging.getLogger(__name__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
