@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
+from tdlgm import TDLGM
 from tdlgm import baseline as baseline_module
 from tdlgm.baseline import Baseline
 from tdlgm.baseline import device as baseline_device
@@ -40,6 +41,14 @@ def test_shampoo_dataloaders_return_batches():
     assert y_val.ndim == 2
     assert x_test.ndim == 2
     assert y_test.ndim == 2
+
+
+def test_core_tdlgm_is_exported_from_package():
+    config = SeriesConfig()
+
+    model = TDLGM(config)
+
+    assert model.config == config
 
 
 def test_long_horizon_training_step_works():

@@ -1,6 +1,8 @@
 from __future__ import annotations
-import json
+
 import argparse
+import json
+import logging
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,9 +12,8 @@ from torch.utils.data import DataLoader
 
 from tdlgm.baseline import Baseline
 from tdlgm.main import unpack_batch
-from tdlgm.tDLGM_new import TDLGM, device
+from tdlgm.model import TDLGM, device
 from tdlgm.util import configure_logging, load_checkpoint, make_dataloaders
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,7 @@ def remove_pytorch(results: dict) -> dict:
 
 
 def benchmark_model(args, model_path: Path) -> None:
-    runtime, model_config, model_state, model_class = load_checkpoint(model_path)
+    runtime, model_config, model_state, _model_class = load_checkpoint(model_path)
     runtime.reduced_dataset = 1  # SHOULD ALWAYS EVALUATE ON WHOLE DATASET BUT FOR NOW WE'LL USE REDUCED DATASET FOR SPEED
     runtime = replace(runtime, output_dim=runtime.horizon)
     runtime = replace(runtime, batch_size=args.batch_size)

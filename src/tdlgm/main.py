@@ -12,7 +12,7 @@ from optuna.exceptions import TrialPruned
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
-from tdlgm.tDLGM_new import TDLGM, device
+from tdlgm.model import TDLGM, device
 from tdlgm.util import (
     SeriesConfig,
     checkpoint_filename,
