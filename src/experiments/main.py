@@ -12,16 +12,17 @@ from optuna.exceptions import TrialPruned
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
-from tdlgm.tDLGM_new import TDLGM, device
-from tdlgm.util import (
+from tdlgm import TDLGM
+from experiments.util import (
     SeriesConfig,
     checkpoint_filename,
     configure_logging,
-    make_dataloaders,
     save_checkpoint,
     save_config,
 )
+from data.data import make_dataloaders
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
 
 
@@ -345,7 +346,7 @@ def main() -> None:
     configure_logging(args.verbose)
 
     if args.baseline:
-        from tdlgm.baseline import baseline_train
+        from experiments.baseline import baseline_train
 
         baseline_train(base_runtime)
         return
