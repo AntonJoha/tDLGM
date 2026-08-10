@@ -14,6 +14,7 @@ let
     gymnasium
     pip
     ruff
+    scikit-learn
 
 
   ]);

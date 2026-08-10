@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 
 
+from sklearn.preprocessing import StandardScaler
+
+
 from pathlib import Path
 
 import csv
@@ -11,12 +14,12 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 import torch
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 DATASET_PATH = Path(__file__).with_name("data").joinpath("shampoo_sales.csv")
-
 
 
 # Converts the contents in a .tsf file into a dataframe and returns it along with other meta-data of the dataset: frequency, horizon, whether the dataset contains missing values and whether the series have equal lengths
@@ -170,8 +173,6 @@ def convert_tsf_to_dataframe(
         )
 
 
-
-
 class TimeSeriesDataset(Dataset):
     def __init__(self, series, context_length, horizon, mean, std):
         self.series = torch.tensor(series, dtype=torch.float32)
@@ -222,7 +223,82 @@ def _split_train_val_test(
     )
 
 
-def get_dataset(
+def get_csv_dataset(
+    file_path,
+    context_length,
+    horizon,
+    batch_size=32,
+    train_fraction=0.8,
+    reduced_dataset=None,
+    seed: int = 42,
+):
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    df = pd.read_csv(path, delimiter=";")
+
+    if path.name == "AirQualityUCI.csv":
+        # Drop the last two columns which are empty
+        df = df.iloc[:, :-2]
+        # Drop the original 'Date' and 'Time' columns
+        df.drop(["Date", "Time"], axis=1, inplace=True)
+        # Replace -200 values with NaN
+        df.replace(-200, np.nan, inplace=True)
+        # Forward fill NaN values
+        df.ffill(inplace=True)
+        # Replace commas with dots in object columns
+        for col in df.columns:
+            if df[col].dtype == "object":
+                df[col] = pd.to_numeric(
+                    df[col].str.replace(",", ".", regex=False),
+                    errors="coerce",
+                )
+
+    scaler = StandardScaler()
+    df_norm = pd.DataFrame(
+        scaler.fit_transform(df),
+        columns=df.columns,
+        index=df.index,
+    )
+    print(df.head())
+    print(df_norm.head())
+    
+
+    dataset=  WindowedSeriesDataset(
+        torch.tensor(df_norm.values, dtype=torch.float32),
+        seq_len=context_length,
+        horizon=horizon,
+    )
+
+    return dataset
+
+
+
+def _reduce_dataset(train_dataset, val_dataset, test_dataset, reduced_dataset, seed):
+    train_size = max(1, int(reduced_dataset * len(train_dataset)))
+    val_size = max(1, int(reduced_dataset * len(val_dataset)))
+    test_size = max(1, int(reduced_dataset * len(test_dataset)))
+    generator = torch.Generator().manual_seed(seed)
+    train_dataset, _ = random_split(
+        train_dataset,
+        [train_size, len(train_dataset) - train_size],
+        generator=generator,
+    )
+    val_dataset, _ = random_split(
+        val_dataset,
+        [val_size, len(val_dataset) - val_size],
+        generator=generator,
+    )
+    test_dataset, _ = random_split(
+        test_dataset,
+        [test_size, len(test_dataset) - test_size],
+        generator=generator,
+    )
+    return train_dataset, val_dataset, test_dataset
+
+
+def get_tsf_dataset(
     tsf_file_path,
     context_length,
     horizon,
@@ -240,6 +316,20 @@ def get_dataset(
 
     ## normalize data
     all_values = []
+    print(df.head())
+
+    seen = []
+    station_ids = {}
+    for station, obs in zip(df["station_id"], df["obs_or_fcst"]):
+        if station not in seen:
+            seen.append(station)
+            station_ids[station] = []
+            print("Station_id", station)
+        station_ids[station].append(obs)
+
+    for station in seen:
+        print("Station_id", station, "Obs_or_fcst", station_ids[station])
+
     for row in df["series_value"]:
         all_values.extend(row)
     all_values = np.array(all_values)
@@ -266,50 +356,10 @@ def get_dataset(
                 ]
             )
 
-    if len(dataset) < 3:
-        raise ValueError("dataset must contain at least three windows")
-
-    train_dataset, val_dataset, test_dataset = _split_train_val_test(
-        dataset,
-        train_fraction=train_fraction,
-        seed=seed,
-    )
-
-    if reduced_dataset is not None:
-        train_size = max(1, int(reduced_dataset * len(train_dataset)))
-        val_size = max(1, int(reduced_dataset * len(val_dataset)))
-        test_size = max(1, int(reduced_dataset * len(test_dataset)))
-        generator = torch.Generator().manual_seed(seed)
-        train_dataset, _ = random_split(
-            train_dataset,
-            [train_size, len(train_dataset) - train_size],
-            generator=generator,
-        )
-        val_dataset, _ = random_split(
-            val_dataset,
-            [val_size, len(val_dataset) - val_size],
-            generator=generator,
-        )
-        test_dataset, _ = random_split(
-            test_dataset,
-            [test_size, len(test_dataset) - test_size],
-            generator=generator,
-        )
-
-    train_df = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_df = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_df = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-    logger.info(f"Train dataset size: {len(train_dataset)}")
-    logger.info(f"Val dataset size: {len(val_dataset)}")
-    logger.info(f"Test dataset size: {len(test_dataset)}")
-    return train_df, val_df, test_df
-
-
+    return dataset 
+   
 class WindowedSeriesDataset(Dataset):
     def __init__(self, series: torch.Tensor, seq_len: int, horizon: int = 1) -> None:
-        if series.ndim != 1:
-            raise ValueError("series must be 1D")
         if len(series) <= seq_len:
             raise ValueError("series must be longer than seq_len")
 
@@ -397,6 +447,30 @@ def get_shampoo_dataloaders(
 
 def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
     dataset_path = Path(get_dataset_names()[0])
+    print(f"Loading dataset from {dataset_path}")
+    
+    dataset = None
+    if dataset_path.suffix == ".tsf":
+        dataset = get_tsf_dataset(
+            dataset_path,
+            config.seq_len,
+            config.horizon,
+            config.batch_size,
+            train_fraction=config.train_fraction,
+            reduced_dataset=config.reduced_dataset,
+            seed=getattr(config, "seed", 42),
+        )
+
+    if dataset_path.suffix == ".csv":
+        dataset =  get_csv_dataset(
+            dataset_path,
+            config.seq_len,
+            config.horizon,
+            config.batch_size,
+            train_fraction=config.train_fraction,
+            reduced_dataset=config.reduced_dataset,
+            seed=getattr(config, "seed", 42),
+        )
 
     if config.shampoo_code or not dataset_path.exists():
         if not dataset_path.exists() and not config.shampoo_code:
@@ -406,16 +480,38 @@ def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
             )
         return get_shampoo_dataloaders(config)
 
-    return get_dataset(
-        dataset_path,
-        config.seq_len,
-        config.horizon,
-        config.batch_size,
+
+    train_dataset, val_dataset, test_dataset = _split_train_val_test(
+        dataset,
         train_fraction=config.train_fraction,
-        reduced_dataset=config.reduced_dataset,
-        seed=getattr(config, "seed", 42),
+        seed=config.seed,
     )
 
 
+    if config.reduced_dataset is not None:
+        train_dataset, val_dataset, test_dataset = _reduce_dataset(
+            train_dataset, val_dataset, test_dataset, config.reduced_dataset, config.seed
+        )
+        
+
+    train_df = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+    val_df = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
+    test_df = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=True)
+
+    logger.info(f"train dataset size: {len(train_dataset)}")
+    logger.info(f"val dataset size: {len(val_dataset)}")
+    logger.info(f"test dataset size: {len(test_dataset)}")
+    return train_df, val_df, test_df
+
+
+
+
 def get_dataset_names():
-    return ["data/pedestrian_counts_dataset.tsf"]
+    return [
+        "data/AirQualityUCI.csv",
+        "data/pedestrian_counts_dataset.tsf",
+        "data/solar_10_minutes_dataset.tsf",
+        "data/m1_monthly_dataset.tsf",
+        "data/covid_deaths_dataset.tsf",
+        "data/traffic_weekly_dataset.tsf",
+    ]

@@ -7,11 +7,11 @@ benchmark:
 	python -m experiments.eval --verbose 
 
 baseline:
-	python -m experiments.main --verbose --baseline --reduced_dataset 0.001 --artifact_dir artifacts/baseline_tune --horizon 100 --epochs 10
+	python -m experiments.main --verbose --baseline  --artifact_dir artifacts/baseline_tune --horizon 100 --epochs 1000
 	
 
 eval_baseline:
-	python -m experiments.eval --verbose  --checkpoint_path artifacts/baseline_tune/checkpoint_epochfinal_20260807-131328.pt
+	python -m experiments.eval --verbose  --checkpoint_path artifacts/baseline_tune/checkpoint_epoch0020_20260810-155003.pt
 
 baseline_shampoo_tune:
 	python -m experiments.main --verbose --baseline --shampoo_code --artifact_dir artifacts/baseline_tune --tune
@@ -22,13 +22,13 @@ baseline_shampoo:
 	
 
 baseline_tune:
-	python -m experiments.main --verbose --baseline --tune --reduced_dataset 0.002 --artifact_dir artifacts/baseline_tune
+	python -m experiments.main --verbose --baseline --tune --artifact_dir artifacts/baseline_tune --horizon 50
 
 tune:
-	python -m experiments.main --verbose --tune --reduced_dataset 0.001 --horizon 100
+	python -m experiments.main --verbose --tune --horizon 50
 
 main:
-	python -m experiments.main --verbose --reduced_dataset 0.005 --learning_rate 0.0001 --horizon 100 --epochs 1000
+	python -m experiments.main --verbose --learning_rate 0.0001 --horizon 100 --epochs 1000
 
 rvae_main:
 	python -m experiments.main_rvae --verbose --reduced_dataset 0.001 --learning_rate 0.01 
@@ -49,7 +49,7 @@ util:
 	python -m experiments.util --verbose 
 
 eval:
-	python -m experiments.eval --verbose  --checkpoint_path artifacts/tdlgm/checkpoint_epochfinal_20260807-140956.pt
+	python -m experiments.eval --verbose  --checkpoint_path artifacts/tdlgm/checkpoint_epochbest_20260810-155525.pt
 
 lint:
 	./lint.sh

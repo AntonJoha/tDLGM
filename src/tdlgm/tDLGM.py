@@ -77,8 +77,8 @@ class TDLGM(nn.Module):
 
         self.model_layers = self.make_tdlmg_layers(config)
 
-        self.model_mean = nn.Linear(config.hidden_dim, config.output_dim)
-        self.model_logvar = nn.Linear(config.hidden_dim, config.output_dim)
+        self.model_mean = nn.Linear(config.hidden_dim, config.output_dim * config.horizon)
+        self.model_logvar = nn.Linear(config.hidden_dim, config.output_dim * config.horizon)
 
         self.mse = nn.MSELoss()
         self.nllLoss = nn.GaussianNLLLoss()
@@ -141,6 +141,10 @@ class TDLGM(nn.Module):
             layers.append(self.make_tdlgm_layer(config))
         return nn.Sequential(*layers)
 
+
+    def _to_output_shape(self, x):
+        return x.view(x.size(0), self.config.horizon, self.config.output_dim)
+
     def forward(self, x):
 
         t, _ = self.input_time_latent(x)
@@ -163,8 +167,9 @@ class TDLGM(nn.Module):
             z = self.reparameterize(xi_mean, xi_log_var)
 
             h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
-        pred_mean = self.model_mean(h)
-        pred_logvar = self.model_logvar(h)
+        pred_mean = self._to_output_shape(self.model_mean(h))
+        pred_logvar = self._to_output_shape(self.model_logvar(h))
+
         return pred_mean, pred_logvar
 
     def reparameterize(self, mean, logvar):
@@ -320,8 +325,8 @@ class TDLGM(nn.Module):
             z = self.reparameterize(mean_q, logvar_q)
             h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
 
-        pred_mean = self.model_mean(h)
-        pred_logvar = self.model_logvar(h)
+        pred_mean = self._to_output_shape(self.model_mean(h))
+        pred_logvar = self._to_output_shape(self.model_logvar(h))
         loss = self.compute_loss(
             y,
             pred_mean,
@@ -414,8 +419,8 @@ class TDLGM(nn.Module):
 
             h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
 
-        pred_mean = self.model_mean(h)
-        pred_logvar = self.model_logvar(h)
+        pred_mean = self._to_output_shape(self.model_mean(h))
+        pred_logvar = self._to_output_shape(self.model_logvar(h))
         rec, kl = self._compute_losses(
             y,
             pred_mean,
