@@ -84,6 +84,7 @@ class SeriesConfig(BaselineConfig):
     verbose: bool = False
     baseline: bool = False
 
+
 def checkpoint_payload(model: nn.Module, runtime: SeriesConfig) -> dict[str, object]:
     return {
         "config": asdict(runtime),
@@ -137,5 +138,3 @@ def load_checkpoint(
     model_state = checkpoint["model_state_dict"]
     model_class = checkpoint.get("model_class")
     return runtime, model_config, model_state, model_class
-
-

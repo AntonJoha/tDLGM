@@ -86,9 +86,7 @@ def evaluate_baseline(model: nn.Module, loader: DataLoader) -> float:
     xs, means, logvars, ys = [], [], [], []
 
     for x, y in loader:
-        pred = model(x)
-        mean = pred[:, : model.config.output_dim]
-        logvar = pred[:, model.config.output_dim :]
+        mean, logvar = model(x)
         losses_position.append(nll_position(mean, y.squeeze(-1), logvar))
         mse_losses.append(float(mse_loss(mean, y.squeeze(-1)).mean()))
         mse_losses_position.append(mse_position(mean, y.squeeze(-1)))
@@ -172,14 +170,26 @@ def remove_pytorch(results: dict) -> dict:
     return remove_tensors(results)
 
 
+
+def _set_input_output_dim(runtime: SeriesConfig, loader: DataLoader) -> None:
+    for x, y in loader:
+        runtime.input_dim = x.shape[-1]
+        runtime.output_dim = y.shape[-1]
+        break
+
+
 def benchmark_model(args, model_path: Path) -> None:
     runtime, model_config, model_state, _model_class = load_checkpoint(model_path)
     runtime.reduced_dataset = 1  # SHOULD ALWAYS EVALUATE ON WHOLE DATASET BUT FOR NOW WE'LL USE REDUCED DATASET FOR SPEED
     runtime = replace(runtime, output_dim=runtime.horizon)
     runtime = replace(runtime, batch_size=args.batch_size)
 
+    _, _, test_loader = make_dataloaders(runtime)
+    _set_input_output_dim(runtime, test_loader)
+
     res = None
     if runtime.model_name == "tdlgm":
+
         model = TDLGM(model_config).to(device)
         model.load_state_dict(model_state)
         _, _, test_loader = make_dataloaders(runtime)

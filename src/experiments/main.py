@@ -32,6 +32,7 @@ def unpack_batch(batch: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = x.unsqueeze(-1)
     if y.ndim == 2:
         y = y.unsqueeze(-1)
+
     return x.to(device), y.to(device)
 
 
@@ -58,6 +59,14 @@ def build_runtime_model(runtime: SeriesConfig) -> tuple[TDLGM, Adam]:
     return model, optimizer
 
 
+def _set_input_output_dim(runtime: SeriesConfig, loader: DataLoader) -> None:
+    for batch in loader:
+        x, y = unpack_batch(batch)
+        runtime.input_dim = x.shape[-1]
+        runtime.output_dim = y.shape[-1]
+        break
+
+
 def train_model(
     runtime: SeriesConfig,
     epochs: int | None = None,
@@ -67,8 +76,12 @@ def train_model(
     torch.manual_seed(runtime.seed)
     runtime = replace(runtime, output_dim=runtime.horizon)
 
-    model, optimizer = build_runtime_model(runtime)
     train_loader, val_loader, _test_loader = make_dataloaders(runtime)
+
+    _set_input_output_dim(runtime, train_loader)
+
+
+    model, optimizer = build_runtime_model(runtime)
     train_epochs = runtime.epochs if epochs is None else epochs
     checkpoint_interval = max(1, runtime.checkpoint_interval)
     early_stopping_patience = runtime.early_stopping_patience
