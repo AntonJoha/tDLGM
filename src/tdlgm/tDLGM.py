@@ -142,8 +142,9 @@ class TDLGM(nn.Module):
         return nn.Sequential(*layers)
 
 
-    def _to_output_shape(self, x):
-        return x.view(x.size(0), self.config.horizon, self.config.output_dim)
+def _to_output_shape(self, x):
+    x = x.view(x.size(0), self.config.horizon, self.config.output_dim)
+    return x.squeeze(-1) if self.config.output_dim == 1 else x
 
     def forward(self, x):
 
