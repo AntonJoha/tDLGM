@@ -64,12 +64,6 @@ class TDLGM(nn.Module):
         super().__init__()
         self.config = config
 
-        self.input_time_latent = SequenceAttentionEncoder(
-            config.input_dim,
-            config.hidden_dim,
-            config.layers,
-            config.seq_len,
-        )
         self.input_generator = _make_mlp(
             config.latent_dim, config.hidden_dim, config.hidden_dim
         )
