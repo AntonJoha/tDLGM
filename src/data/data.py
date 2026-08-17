@@ -446,10 +446,24 @@ def get_shampoo_dataloaders(
 
 
 def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
+    data_name = get_dataset_names()[0]
     dataset_path = Path(get_dataset_names()[0])
     print(f"Loading dataset from {dataset_path}")
     
     dataset = None
+    print(dataset_path)
+    if data_name == "blizzard":
+        print("HERE")
+        from .blizzard_load import load_dataset
+        dataset = load_dataset(
+            dataset_path,
+            config.seq_len,
+            config.horizon,
+            config.batch_size,
+            train_fraction=config.train_fraction,
+            reduced_dataset=config.reduced_dataset,
+            seed=getattr(config, "seed", 42),
+        )
     if dataset_path.suffix == ".tsf":
         dataset = get_tsf_dataset(
             dataset_path,
@@ -472,7 +486,7 @@ def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
             seed=getattr(config, "seed", 42),
         )
 
-    if config.shampoo_code or not dataset_path.exists():
+    if config.shampoo_code or dataset is None:
         if not dataset_path.exists() and not config.shampoo_code:
             logger.warning(
                 "Dataset %s not found; falling back to the bundled shampoo data.",
@@ -508,6 +522,7 @@ def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
 
 def get_dataset_names():
     return [
+        "blizzard",
         "data/AirQualityUCI.csv",
         "data/pedestrian_counts_dataset.tsf",
         "data/solar_10_minutes_dataset.tsf",
