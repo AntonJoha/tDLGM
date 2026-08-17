@@ -106,26 +106,29 @@ def train_model(
         for batch in train_loader:
             x, y = unpack_batch(batch)
             epoch_losses.append(model.train_step(x, y, optimizer))
-            t_recon_loss, t_kl_loss, t_consistency = model.compute_losses(
-                x,
-                y,
-                prior=False,
-            )
-            t_recon_loss_p, t_kl_loss_p, t_consistency_p = model.compute_losses(
-                x,
-                y,
-                prior=True,
-            )
-            recon_loss += t_recon_loss
-            kl_loss += t_kl_loss
-            consistency += t_consistency
-            recon_loss_p += t_recon_loss_p
-            kl_loss_p += t_kl_loss_p
-            consistency_p += t_consistency_p
 
         val_loss = evaluate(model, val_loader)
 
         if runtime.verbose:
+            for batch in train_loader:
+                x, y = unpack_batch(batch)
+                t_recon_loss, t_kl_loss, t_consistency = model.compute_losses(
+                    x,
+                    y,
+                    prior=False,
+                )
+                t_recon_loss_p, t_kl_loss_p, t_consistency_p = model.compute_losses(
+                    x,
+                    y,
+                    prior=True,
+                )
+                recon_loss += t_recon_loss
+                kl_loss += t_kl_loss
+                consistency += t_consistency
+                recon_loss_p += t_recon_loss_p
+                kl_loss_p += t_kl_loss_p
+                consistency_p += t_consistency_p
+
             train_batches = max(1, len(train_loader))
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
             recon_loss /= train_batches

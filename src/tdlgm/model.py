@@ -158,6 +158,8 @@ class TDLGM(nn.Module):
     ]:
         if x.ndim == 2:
             x = x.unsqueeze(-1)
+        if y is not None and y.ndim == 2:
+            y = y.unsqueeze(-1)
         x_flat = x.flatten(start_dim=1)
         y_flat = None if y is None else torch.cat([x, y], dim=-2).flatten(start_dim=1)
 
