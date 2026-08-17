@@ -1,3 +1,3 @@
-from .tDLGM import TDLGM
+from .model import TDLGM, TDLGMConfig
 
-__all__ = ["TDLGM"]
+__all__ = ["TDLGM", "TDLGMConfig"]

@@ -49,6 +49,8 @@ def test_core_tdlgm_is_exported_from_package():
     model = TDLGM(config)
 
     assert model.config == config
+    assert any(isinstance(module, nn.MultiheadAttention) for module in model.modules())
+    assert not any(isinstance(module, nn.LSTM) for module in model.modules())
 
 
 def test_long_horizon_training_step_works():
