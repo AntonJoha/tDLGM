@@ -73,6 +73,9 @@ class Baseline(nn.Module):
     ) -> float:
         self.train()
         optimizer.zero_grad()
+        model_device = next(self.parameters()).device
+        x = x.to(model_device)
+        y = y.to(model_device)
         mean, logvar = self(x)
         loss = self.loss(mean, self._target(y, mean), logvar.exp())
         loss.backward()
