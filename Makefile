@@ -41,6 +41,8 @@ shampoo_tune:
 	python -m tdlgm.main --shampoo_code --verbose --epochs 100 --tune
 
 
+audio:
+	python -m data.blizzard_torch --verbose
 
 tDLGM:
 	python -m tdlgm.tDLGM --verbose 

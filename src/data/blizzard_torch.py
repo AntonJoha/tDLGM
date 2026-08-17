@@ -1,85 +1,77 @@
-import numpy as np
-import torch
-from torch.utils.data import Dataset
-from scipy.signal import windows
+from pathlib import Path
+import logging
+
+from experiments.util import configure_logging
+import pickle
+import librosa
+
+logger = logging.getLogger(__name__)
+
+path = Path(__file__).parent
+folder = path / "blizzard_wav"
 
 
-def p2r(magnitude, phase):
-    return magnitude * np.exp(1j * phase)
+samples_per_second = 16000
+segment_length = 0.5 # seconds
+dimensions = 200
+horizon = 1
 
 
-def r2p(x):
-    return np.abs(x), np.angle(x)
+def get_all_wavs():
+    wavs = list(folder.glob("*.wav"))
+    return wavs
 
 
-def is_power2(num):
-    return num != 0 and ((num & (num - 1)) == 0)
+def make_segments(audio, sr):
+    segments = []
+    for i in range(0, len(audio) - dimensions, dimensions):
+        segment = audio[i:i + dimensions]
+        segments.append(segment)
+    return segments
 
 
-def segment_axis(x, frame_size, overlap=0):
-    step = frame_size - overlap
-    n_frames = (len(x) - overlap) // step
+def get_seq_len():
+    return int((samples_per_second * segment_length)/dimensions)
 
-    frames = np.stack(
-        [x[i * step:i * step + frame_size]
-         for i in range(n_frames)],
-        axis=0
-    )
-    return frames
+def segments_to_entries(segments):
+    entries = []
+    seq_len = get_seq_len()
+    for i in range(0, len(segments) - seq_len - horizon):
+        entry = segments[i:i + seq_len]
+        target = segments[i + seq_len:i + seq_len + horizon]
+        entries.append((entry, target))
+    return entries
+
+def load_data():
+    checkpoints = 200
+    count = 0
+    files = get_all_wavs()
+    entries = []
+    for f in files:
+        audio, sr = librosa.load(f, sr=None)
+        segments = make_segments(audio, sr)
+        entries.append(segments_to_entries(segments))
+        count += 1
+
+        if count % checkpoints == 0:
+            logger.info(f"Processed {count} files")
+            save_path = path / f"data_{count/checkpoints:04d}.pkl"
+            with open(save_path, "wb") as f:
+                pickle.dump(entries, f, protocol=pickle.HIGHEST_PROTOCOL)
+            entries.clear()
 
 
-class BlizzardDataset(Dataset):
-    def __init__(
-        self,
-        data,
-        x_mean=None,
-        x_std=None,
-        seq_len=32000,
-        frame_size=200,
-        use_window=False,
-        use_spec=False
-    ):
-        self.data = data
-        self.seq_len = seq_len
-        self.frame_size = frame_size
-        self.use_window = use_window
-        self.use_spec = use_spec
 
-        self.x_mean = x_mean
-        self.x_std = x_std
+    
 
-        if use_spec:
-            if not is_power2(frame_size):
-                raise ValueError(
-                    "frame_size must be a power of 2 when use_spec=True"
-                )
+    audio, sr = librosa.load(path / "blizzard_wav/01_bx_potter_01.wav", sr=None)
+    logger.info(audio.shape, sr)
+    logger.info(max(audio), min(audio))
 
-            self.overlap = frame_size // 2
-            self.window = windows.hann(frame_size).astype(np.float32)
-        elif use_window:
-            self.overlap = frame_size // 2
-            self.window = windows.hann(frame_size).astype(np.float32)
-        else:
-            self.overlap = 0
 
-    def __len__(self):
-        return len(self.data)
 
-    def apply_window(self, batch):
-        return self.window * batch
+if __name__ == "__main__":
+    configure_logging(True)
+    load_data()
 
-    def apply_fft(self, batch):
-        batch = torch.tensor(batch, dtype=torch.float32)
-
-        return torch.fft.rfft(batch, dim=-1)
-
-    def log_magnitude(self, fft_batch):
-        mag = torch.abs(fft_batch)
-        phase = torch.angle(fft_batch)
-
-        log_mag = torch.log10(mag + 1.0)
-
-        return torch.polar(log_mag, phase)
-
-    def __getitem__(self, idx):
-        x = np.asarray
+    print("Hello")

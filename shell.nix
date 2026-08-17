@@ -15,6 +15,7 @@ let
     pip
     ruff
     scikit-learn
+    librosa
 
 
   ]);
