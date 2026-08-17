@@ -2,7 +2,6 @@ import json
 import logging
 import time
 from dataclasses import asdict, dataclass
-
 from pathlib import Path
 
 import torch
@@ -83,6 +82,7 @@ class SeriesConfig(BaselineConfig):
     # Misc
     verbose: bool = False
     baseline: bool = False
+    attention: bool = True
 
 
 def checkpoint_payload(model: nn.Module, runtime: SeriesConfig) -> dict[str, object]:

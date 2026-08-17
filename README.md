@@ -1,6 +1,6 @@
 # tdlgm :)
 
-Run the time-series example with tuning and logs:
+Run the attention-based time-series example with tuning and logs:
 
 ```bash
 PYTHONPATH=src python -m tdlgm.main --tune --verbose
