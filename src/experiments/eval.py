@@ -14,7 +14,7 @@ from data.data import make_dataloaders
 from experiments.baseline import Baseline
 from experiments.main import unpack_batch
 from experiments.util import SeriesConfig, configure_logging, load_checkpoint
-from tdlgm import TDLGM
+from tdlgm import TDLGM_attention, TDLGM_rnn
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -188,7 +188,11 @@ def benchmark_model(args, model_path: Path) -> None:
 
     res = None
     if runtime.model_name == "tdlgm":
-        model = TDLGM(model_config).to(device)
+        if runtime.attention == True:
+            model = TDLGM_attention(model_config).to(device)
+        else:
+            model = TDLGM_rnn(model_config).to(device)
+
         model.load_state_dict(model_state)
         _, _, test_loader = make_dataloaders(runtime)
         res = evaluate_tdlgm(model, test_loader)

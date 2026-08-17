@@ -20,7 +20,7 @@ from experiments.util import (
     save_checkpoint,
     save_config,
 )
-from tdlgm import TDLGM
+from tdlgm import TDLGM_attention, TDLGM_rnn, TDLGMConfig
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
@@ -49,7 +49,10 @@ def evaluate(model: TDLGM, loader: DataLoader) -> float:
 
 
 def build_runtime_model(runtime: SeriesConfig) -> tuple[TDLGM, Adam]:
-    model = TDLGM(runtime).to(device)
+    if runtime.attention:
+        model = TDLGM_attention(runtime).to(device)
+    else:
+        model = TDLGM_rnn(runtime).to(device)
     if runtime.verbose:
         logger.info(
             "Parameters: %s",
@@ -348,6 +351,11 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="Save a checkpoint every N epochs",
     )
+    parser.add_argument(
+        "--attention",
+        type=bool,
+        default=True,
+        help="Use attention mechanism in the tDLGM model, if False, use RNN-based tDLGM, default True",)
     return parser.parse_args()
 
 

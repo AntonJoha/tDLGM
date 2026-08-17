@@ -41,9 +41,9 @@ class Baseline(nn.Module):
         self.config = config
 
 
-def _to_output_shape(self, x):
-    x = x.view(x.size(0), self.config.horizon, self.config.output_dim)
-    return x.squeeze(-1) if self.config.output_dim == 1 else x
+    def _to_output_shape(self, x):
+        x = x.view(x.size(0), self.config.horizon, self.config.output_dim)
+        return x.squeeze(-1) if self.config.output_dim == 1 else x
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.ndim == 2:
