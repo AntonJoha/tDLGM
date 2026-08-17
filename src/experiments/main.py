@@ -353,9 +353,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--attention",
-        type=bool,
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Use attention mechanism in the tDLGM model, if False, use RNN-based tDLGM, default True",)
+        help=(
+            "Use attention mechanism in the tDLGM model; use --no-attention to run the RNN-based model."
+        ),
+    )
     return parser.parse_args()
 
 
