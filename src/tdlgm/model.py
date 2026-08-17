@@ -68,7 +68,9 @@ class TDLGM(nn.Module):
             config.layers,
             config.seq_len,
         )
-        self.input_generator = _make_mlp(config.latent_dim, config.hidden_dim, config.hidden_dim)
+        self.input_generator = _make_mlp(
+            config.latent_dim, config.hidden_dim, config.hidden_dim
+        )
         self.input_posterior = _make_mlp(
             config.input_dim * (config.seq_len + config.horizon),
             config.hidden_dim,
@@ -81,8 +83,12 @@ class TDLGM(nn.Module):
         )
 
         self.model_layers = self.make_tdlgm_layers(config)
-        self.model_mean = nn.Linear(config.hidden_dim, config.output_dim * config.horizon)
-        self.model_logvar = nn.Linear(config.hidden_dim, config.output_dim * config.horizon)
+        self.model_mean = nn.Linear(
+            config.hidden_dim, config.output_dim * config.horizon
+        )
+        self.model_logvar = nn.Linear(
+            config.hidden_dim, config.output_dim * config.horizon
+        )
 
         self.mse = nn.MSELoss()
         self.nllLoss = nn.GaussianNLLLoss()
@@ -193,12 +199,23 @@ class TDLGM(nn.Module):
             mean_p_list.append(mean_p)
             logvar_p_list.append(logvar_p)
 
-            z = self.reparameterize(mean_p, logvar_p) if prior or mean_q is None else self.reparameterize(mean_q, logvar_q)
+            z = (
+                self.reparameterize(mean_p, logvar_p)
+                if prior or mean_q is None
+                else self.reparameterize(mean_q, logvar_q)
+            )
             h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
 
         pred_mean = self._to_output_shape(self.model_mean(h))
         pred_logvar = self._to_output_shape(self.model_logvar(h))
-        return pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list
+        return (
+            pred_mean,
+            pred_logvar,
+            mean_q_list,
+            logvar_q_list,
+            mean_p_list,
+            logvar_p_list,
+        )
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         pred_mean, pred_logvar, *_ = self._latent_pass(x, prior=True)
@@ -276,9 +293,14 @@ class TDLGM(nn.Module):
     ) -> float:
         self.train()
         optimizer.zero_grad()
-        pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list = self._latent_pass(
-            x, y, prior=False
-        )
+        (
+            pred_mean,
+            pred_logvar,
+            mean_q_list,
+            logvar_q_list,
+            mean_p_list,
+            logvar_p_list,
+        ) = self._latent_pass(x, y, prior=False)
         loss = self.compute_loss(
             y,
             pred_mean,
@@ -294,9 +316,14 @@ class TDLGM(nn.Module):
 
     @torch.no_grad()
     def get_loss(self, x: torch.Tensor, y: torch.Tensor) -> float:
-        pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list = self._latent_pass(
-            x, y, prior=True
-        )
+        (
+            pred_mean,
+            pred_logvar,
+            mean_q_list,
+            logvar_q_list,
+            mean_p_list,
+            logvar_p_list,
+        ) = self._latent_pass(x, y, prior=True)
         loss = self.compute_loss(
             y,
             pred_mean,
@@ -310,9 +337,14 @@ class TDLGM(nn.Module):
 
     @torch.no_grad()
     def compute_losses(self, x: torch.Tensor, y: torch.Tensor, prior: bool = True):
-        pred_mean, pred_logvar, mean_q_list, logvar_q_list, mean_p_list, logvar_p_list = self._latent_pass(
-            x, y, prior=prior
-        )
+        (
+            pred_mean,
+            pred_logvar,
+            mean_q_list,
+            logvar_q_list,
+            mean_p_list,
+            logvar_p_list,
+        ) = self._latent_pass(x, y, prior=prior)
         rec, kl = self._compute_losses(
             y,
             pred_mean,

@@ -48,6 +48,8 @@ def evaluate(model: TDLGM, loader: DataLoader) -> float:
 
 
 def build_runtime_model(runtime: SeriesConfig) -> tuple[TDLGM, Adam]:
+    if runtime.output_dim == runtime.horizon and runtime.input_dim == 1:
+        runtime = replace(runtime, output_dim=1)
     model = TDLGM(runtime).to(device)
     if runtime.verbose:
         logger.info(

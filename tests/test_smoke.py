@@ -4,15 +4,15 @@ from dataclasses import replace
 from pathlib import Path
 
 import torch
+from tdlgm.baseline import Baseline
+from tdlgm.baseline import device as baseline_device
+from tdlgm.util import SeriesConfig, checkpoint_filename, make_dataloaders
 from torch import nn
 
 from tdlgm import TDLGM
 from tdlgm import baseline as baseline_module
-from tdlgm.baseline import Baseline
-from tdlgm.baseline import device as baseline_device
 from tdlgm.main import build_runtime_model, unpack_batch
 from tdlgm.main import train_model as tdlgm_train_model
-from tdlgm.util import SeriesConfig, checkpoint_filename, make_dataloaders
 
 
 def test_shampoo_dataloaders_return_batches():

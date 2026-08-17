@@ -10,11 +10,11 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from data.data import make_dataloaders
 from experiments.baseline import Baseline
 from experiments.main import unpack_batch
+from experiments.util import SeriesConfig, configure_logging, load_checkpoint
 from tdlgm import TDLGM
-from experiments.util import configure_logging, load_checkpoint
-from data.data import make_dataloaders
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -170,7 +170,6 @@ def remove_pytorch(results: dict) -> dict:
     return remove_tensors(results)
 
 
-
 def _set_input_output_dim(runtime: SeriesConfig, loader: DataLoader) -> None:
     for x, y in loader:
         runtime.input_dim = x.shape[-1]
@@ -189,7 +188,6 @@ def benchmark_model(args, model_path: Path) -> None:
 
     res = None
     if runtime.model_name == "tdlgm":
-
         model = TDLGM(model_config).to(device)
         model.load_state_dict(model_state)
         _, _, test_loader = make_dataloaders(runtime)

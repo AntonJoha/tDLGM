@@ -1,3 +1,5 @@
+# ruff: noqa: N999
+
 from .main import main
 from .model import TDLGM, TDLGMConfig
 

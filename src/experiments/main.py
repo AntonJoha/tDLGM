@@ -12,7 +12,7 @@ from optuna.exceptions import TrialPruned
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
-from tdlgm import TDLGM
+from data.data import make_dataloaders
 from experiments.util import (
     SeriesConfig,
     checkpoint_filename,
@@ -20,7 +20,7 @@ from experiments.util import (
     save_checkpoint,
     save_config,
 )
-from data.data import make_dataloaders
+from tdlgm import TDLGM
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
@@ -79,7 +79,6 @@ def train_model(
     train_loader, val_loader, _test_loader = make_dataloaders(runtime)
 
     _set_input_output_dim(runtime, train_loader)
-
 
     model, optimizer = build_runtime_model(runtime)
     train_epochs = runtime.epochs if epochs is None else epochs

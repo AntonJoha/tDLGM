@@ -11,6 +11,7 @@ from optuna.exceptions import TrialPruned
 from torch import nn
 from torch.utils.data import DataLoader
 
+from data.data import make_dataloaders
 from experiments.util import (
     BaselineConfig,
     SeriesConfig,
@@ -18,7 +19,6 @@ from experiments.util import (
     save_checkpoint,
     save_config,
 )
-from data.data import make_dataloaders
 
 logger = logging.getLogger(__name__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -34,24 +34,29 @@ class Baseline(nn.Module):
             num_layers=config.layers,
             batch_first=True,
         )
-        self.linear = nn.Linear(config.hidden_dim, config.output_dim * 2*config.horizon)
+        self.linear = nn.Linear(
+            config.hidden_dim, config.output_dim * 2 * config.horizon
+        )
         self.loss = nn.GaussianNLLLoss()
         self.config = config
+
 
 def _to_output_shape(self, x):
     x = x.view(x.size(0), self.config.horizon, self.config.output_dim)
     return x.squeeze(-1) if self.config.output_dim == 1 else x
 
-
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.ndim == 2:
             x = x.unsqueeze(-1)
         x, _ = self.lstm(x)
-        x = self.linear(x)[:,-1,:]
+        x = self.linear(x)[:, -1, :]
 
-        mean = self._to_output_shape(x[:, : self.config.output_dim * self.config.horizon])
-        logvar = self._to_output_shape(x[:, self.config.output_dim * self.config.horizon :])
+        mean = self._to_output_shape(
+            x[:, : self.config.output_dim * self.config.horizon]
+        )
+        logvar = self._to_output_shape(
+            x[:, self.config.output_dim * self.config.horizon :]
+        )
         return mean, logvar
 
     def _target(self, y: torch.Tensor, mean: torch.Tensor) -> torch.Tensor:
@@ -88,13 +93,11 @@ def evaluate(model: nn.Module, loader: DataLoader) -> float:
     return sum(losses) / max(1, len(losses))
 
 
-
 def _set_input_output_dim(runtime: SeriesConfig, loader: DataLoader) -> None:
     for x, y in loader:
         runtime.input_dim = x.shape[-1]
         runtime.output_dim = y.shape[-1]
         break
-
 
 
 def train_model(
@@ -105,7 +108,6 @@ def train_model(
 ) -> tuple[float, float]:
     torch.manual_seed(runtime.seed)
     runtime = replace(runtime, output_dim=runtime.horizon)
-
 
     train_loader, val_loader, _test_loader = make_dataloaders(runtime)
     _set_input_output_dim(runtime, train_loader)
