@@ -7,7 +7,7 @@ benchmark:
 	python -m experiments.eval --verbose 
 
 baseline:
-	python -m experiments.main --verbose --baseline  --artifact_dir artifacts/baseline_tune --horizon 100 --epochs 1000
+	python -m experiments.main --verbose --baseline  --artifact_dir artifacts/baseline_tune --horizon 100 --epochs 1000 --learning_rate 0.0001
 	
 
 eval_baseline:
@@ -49,7 +49,7 @@ util:
 	python -m experiments.util --verbose 
 
 eval:
-	python -m experiments.eval --verbose  --checkpoint_path artifacts/tdlgm/checkpoint_epochbest_20260810-155525.pt
+	python -m experiments.eval --verbose  --checkpoint_path artifacts/tdlgm/checkpoint_epochbest_20260817-102926.pt
 
 lint:
 	./lint.sh

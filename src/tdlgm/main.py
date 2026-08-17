@@ -20,7 +20,7 @@ from experiments.util import (
     save_checkpoint,
     save_config,
 )
-from tdlgm import TDLGM_attention, TDLGM_rnn, TDLGMConfig
+from tdlgm import TDLGM
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
@@ -32,7 +32,6 @@ def unpack_batch(batch: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = x.unsqueeze(-1)
     if y.ndim == 2:
         y = y.unsqueeze(-1)
-
     return x.to(device), y.to(device)
 
 
@@ -42,17 +41,16 @@ def evaluate(model: TDLGM, loader: DataLoader) -> float:
     losses = []
     for batch in loader:
         x, y = unpack_batch(batch)
-        mean, logvar, *_ = model(x)
+        mean, logvar = model(x)
         losses.append(float(model.nllLoss(mean, y.squeeze(-1), logvar.exp())))
     model.train()
     return sum(losses) / max(1, len(losses))
 
 
 def build_runtime_model(runtime: SeriesConfig) -> tuple[TDLGM, Adam]:
-    if runtime.attention:
-        model = TDLGM_attention(runtime).to(device)
-    else:
-        model = TDLGM_rnn(runtime).to(device)
+    if runtime.output_dim == runtime.horizon and runtime.input_dim == 1:
+        runtime = replace(runtime, output_dim=1)
+    model = TDLGM(runtime).to(device)
     if runtime.verbose:
         logger.info(
             "Parameters: %s",
@@ -80,7 +78,6 @@ def train_model(
     runtime = replace(runtime, output_dim=runtime.horizon)
 
     train_loader, val_loader, _test_loader = make_dataloaders(runtime)
-
     _set_input_output_dim(runtime, train_loader)
 
     model, optimizer = build_runtime_model(runtime)
@@ -109,26 +106,29 @@ def train_model(
         for batch in train_loader:
             x, y = unpack_batch(batch)
             epoch_losses.append(model.train_step(x, y, optimizer))
-            t_recon_loss, t_kl_loss, t_consistency = model.compute_losses(
-                x,
-                y,
-                prior=False,
-            )
-            t_recon_loss_p, t_kl_loss_p, t_consistency_p = model.compute_losses(
-                x,
-                y,
-                prior=True,
-            )
-            recon_loss += t_recon_loss
-            kl_loss += t_kl_loss
-            consistency += t_consistency
-            recon_loss_p += t_recon_loss_p
-            kl_loss_p += t_kl_loss_p
-            consistency_p += t_consistency_p
 
         val_loss = evaluate(model, val_loader)
 
         if runtime.verbose:
+            for batch in train_loader:
+                x, y = unpack_batch(batch)
+                t_recon_loss, t_kl_loss, t_consistency = model.compute_losses(
+                    x,
+                    y,
+                    prior=False,
+                )
+                t_recon_loss_p, t_kl_loss_p, t_consistency_p = model.compute_losses(
+                    x,
+                    y,
+                    prior=True,
+                )
+                recon_loss += t_recon_loss
+                kl_loss += t_kl_loss
+                consistency += t_consistency
+                recon_loss_p += t_recon_loss_p
+                kl_loss_p += t_kl_loss_p
+                consistency_p += t_consistency_p
+
             train_batches = max(1, len(train_loader))
             mean_loss = sum(epoch_losses) / max(1, len(epoch_losses))
             recon_loss /= train_batches
@@ -265,7 +265,8 @@ def train(base_runtime: SeriesConfig) -> Path:
     torch.manual_seed(base_runtime.seed)
     if base_runtime.verbose:
         logger.info(
-            "Starting training with %s.", "tuning" if base_runtime.tune else "no tuning"
+            "Starting training with %s.",
+            "tuning" if base_runtime.tune else "no tuning",
         )
 
     runtime = tune_hyperparameters(base_runtime) if base_runtime.tune else base_runtime
@@ -279,16 +280,14 @@ def train(base_runtime: SeriesConfig) -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train a tDLGM model on a time series dataset."
+        description="Train an attention-based tDLGM model on a time series dataset."
     )
     parser.add_argument(
         "--shampoo_code",
         action="store_true",
         help="Use the bundled shampoo sales dataset.",
     )
-    parser.add_argument(
-        "--seed", type=int, default=42, help="Random seed for reproducibility"
-    )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
         "--seq_len",
         type=int,
@@ -296,14 +295,12 @@ def parse_args() -> argparse.Namespace:
         help="Context length for the time series dataset",
     )
     parser.add_argument(
-        "--horizon", type=int, default=1, help="Horizon for the time series dataset"
+        "--horizon", type=int, default=1, help="Forecast horizon for the dataset"
     )
     parser.add_argument(
         "--batch_size", type=int, default=32, help="Batch size for training"
     )
-    parser.add_argument(
-        "--epochs", type=int, default=100, help="Number of training epochs"
-    )
+    parser.add_argument("--epochs", type=int, default=100, help="Training epochs")
     parser.add_argument(
         "--learning_rate",
         type=float,
@@ -311,10 +308,10 @@ def parse_args() -> argparse.Namespace:
         help="Learning rate for the optimizer",
     )
     parser.add_argument(
-        "--hidden_dim", type=int, default=32, help="Hidden size for the tDLGM model"
+        "--hidden_dim", type=int, default=32, help="Hidden size for the model"
     )
     parser.add_argument(
-        "--latent_dim", type=int, default=8, help="Latent dimension for the tDLGM model"
+        "--latent_dim", type=int, default=8, help="Latent dimension for the model"
     )
     parser.add_argument(
         "--train_fraction",
@@ -325,9 +322,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tune", action="store_true", help="Enable hyperparameter tuning with Optuna"
     )
-    parser.add_argument(
-        "--verbose", action="store_true", help="Enable verbose logging output"
-    )
+    parser.add_argument("--verbose", action="store_true", help="Enable logging")
     parser.add_argument(
         "--baseline",
         action="store_true",
@@ -351,21 +346,12 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="Save a checkpoint every N epochs",
     )
-    parser.add_argument(
-        "--attention",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Use attention mechanism in the tDLGM model; use --no-attention to run the RNN-based model."
-        ),
-    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     base_runtime = SeriesConfig(**vars(args))
-
     configure_logging(args.verbose)
 
     if args.baseline:

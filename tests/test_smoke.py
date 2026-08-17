@@ -4,15 +4,15 @@ from dataclasses import replace
 from pathlib import Path
 
 import torch
+from tdlgm.baseline import Baseline
+from tdlgm.baseline import device as baseline_device
+from tdlgm.util import SeriesConfig, checkpoint_filename, make_dataloaders
 from torch import nn
 
 from tdlgm import TDLGM
 from tdlgm import baseline as baseline_module
-from tdlgm.baseline import Baseline
-from tdlgm.baseline import device as baseline_device
 from tdlgm.main import build_runtime_model, unpack_batch
 from tdlgm.main import train_model as tdlgm_train_model
-from tdlgm.util import SeriesConfig, checkpoint_filename, make_dataloaders
 
 
 def test_shampoo_dataloaders_return_batches():
@@ -49,6 +49,8 @@ def test_core_tdlgm_is_exported_from_package():
     model = TDLGM(config)
 
     assert model.config == config
+    assert any(isinstance(module, nn.MultiheadAttention) for module in model.modules())
+    assert not any(isinstance(module, nn.LSTM) for module in model.modules())
 
 
 def test_long_horizon_training_step_works():

@@ -433,3 +433,4 @@ def _to_output_shape(self, x):
         )
 
         return rec.item(), kl.item(), 0
+

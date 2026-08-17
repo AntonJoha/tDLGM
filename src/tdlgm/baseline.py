@@ -13,9 +13,9 @@ from torch.utils.data import DataLoader
 
 from data.data import make_dataloaders
 from experiments.util import (
-    BaselineConfig,
     SeriesConfig,
     checkpoint_filename,
+    configure_logging,
     save_checkpoint,
     save_config,
 )
@@ -25,8 +25,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class Baseline(nn.Module):
-    def __init__(self, config: BaselineConfig):
+    def __init__(self, config: SeriesConfig):
         super().__init__()
+        if config.output_dim == config.horizon and config.input_dim == 1:
+            config = replace(config, output_dim=1)
         self.config = config
         self.lstm = nn.LSTM(
             config.input_dim,
@@ -38,19 +40,16 @@ class Baseline(nn.Module):
             config.hidden_dim, config.output_dim * 2 * config.horizon
         )
         self.loss = nn.GaussianNLLLoss()
-        self.config = config
 
-
-    def _to_output_shape(self, x):
+    def _to_output_shape(self, x: torch.Tensor) -> torch.Tensor:
         x = x.view(x.size(0), self.config.horizon, self.config.output_dim)
         return x.squeeze(-1) if self.config.output_dim == 1 else x
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if x.ndim == 2:
             x = x.unsqueeze(-1)
         x, _ = self.lstm(x)
         x = self.linear(x)[:, -1, :]
-
         mean = self._to_output_shape(
             x[:, : self.config.output_dim * self.config.horizon]
         )
@@ -74,6 +73,9 @@ class Baseline(nn.Module):
     ) -> float:
         self.train()
         optimizer.zero_grad()
+        model_device = next(self.parameters()).device
+        x = x.to(model_device)
+        y = y.to(model_device)
         mean, logvar = self(x)
         loss = self.loss(mean, self._target(y, mean), logvar.exp())
         loss.backward()
@@ -101,7 +103,7 @@ def _set_input_output_dim(runtime: SeriesConfig, loader: DataLoader) -> None:
 
 
 def train_model(
-    runtime: BaselineConfig,
+    runtime: SeriesConfig,
     epochs: int | None = None,
     trial: optuna.Trial | None = None,
     save_to: Path | None = None,
@@ -197,7 +199,9 @@ def train_model(
 
     if save_to is not None:
         saved_path = save_checkpoint(
-            model, runtime, save_to / checkpoint_filename("final")
+            model,
+            runtime,
+            save_to / checkpoint_filename("final"),
         )
         if runtime.verbose:
             logger.info("Saved checkpoint to %s", saved_path)
@@ -236,3 +240,17 @@ def baseline_train(runtime: SeriesConfig) -> Path:
     artifact_dir = Path(runtime.artifact_dir)
     train_model(runtime, save_to=artifact_dir)
     return artifact_dir
+
+
+__all__ = [
+    "Baseline",
+    "baseline_train",
+    "configure_logging",
+    "device",
+    "evaluate",
+    "make_dataloaders",
+    "save_checkpoint",
+    "save_config",
+    "train_model",
+    "tune_hyperparameters",
+]

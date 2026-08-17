@@ -1,19 +1,14 @@
+import csv
+import logging
 from datetime import datetime, timezone
 from distutils.util import strtobool
-import numpy as np
-import pandas as pd
-
-
-from sklearn.preprocessing import StandardScaler
-
-
 from pathlib import Path
 
-import csv
-from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
+import numpy as np
+import pandas as pd
 import torch
-
-import logging
+from sklearn.preprocessing import StandardScaler
+from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 
 logger = logging.getLogger(__name__)
 
@@ -263,16 +258,14 @@ def get_csv_dataset(
     )
     print(df.head())
     print(df_norm.head())
-    
 
-    dataset=  WindowedSeriesDataset(
+    dataset = WindowedSeriesDataset(
         torch.tensor(df_norm.values, dtype=torch.float32),
         seq_len=context_length,
         horizon=horizon,
     )
 
     return dataset
-
 
 
 def _reduce_dataset(train_dataset, val_dataset, test_dataset, reduced_dataset, seed):
@@ -356,8 +349,9 @@ def get_tsf_dataset(
                 ]
             )
 
-    return dataset 
-   
+    return dataset
+
+
 class WindowedSeriesDataset(Dataset):
     def __init__(self, series: torch.Tensor, seq_len: int, horizon: int = 1) -> None:
         if len(series) <= seq_len:
@@ -448,7 +442,15 @@ def get_shampoo_dataloaders(
 def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
     dataset_path = Path(get_dataset_names()[0])
     print(f"Loading dataset from {dataset_path}")
-    
+
+    if config.shampoo_code or not dataset_path.exists():
+        if not dataset_path.exists() and not config.shampoo_code:
+            logger.warning(
+                "Dataset %s not found; falling back to the bundled shampoo data.",
+                dataset_path,
+            )
+        return get_shampoo_dataloaders(config)
+
     dataset = None
     if dataset_path.suffix == ".tsf":
         dataset = get_tsf_dataset(
@@ -462,7 +464,7 @@ def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
         )
 
     if dataset_path.suffix == ".csv":
-        dataset =  get_csv_dataset(
+        dataset = get_csv_dataset(
             dataset_path,
             config.seq_len,
             config.horizon,
@@ -472,27 +474,20 @@ def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
             seed=getattr(config, "seed", 42),
         )
 
-    if config.shampoo_code or not dataset_path.exists():
-        if not dataset_path.exists() and not config.shampoo_code:
-            logger.warning(
-                "Dataset %s not found; falling back to the bundled shampoo data.",
-                dataset_path,
-            )
-        return get_shampoo_dataloaders(config)
-
-
     train_dataset, val_dataset, test_dataset = _split_train_val_test(
         dataset,
         train_fraction=config.train_fraction,
         seed=config.seed,
     )
 
-
     if config.reduced_dataset is not None:
         train_dataset, val_dataset, test_dataset = _reduce_dataset(
-            train_dataset, val_dataset, test_dataset, config.reduced_dataset, config.seed
+            train_dataset,
+            val_dataset,
+            test_dataset,
+            config.reduced_dataset,
+            config.seed,
         )
-        
 
     train_df = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
     val_df = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
@@ -502,8 +497,6 @@ def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
     logger.info(f"val dataset size: {len(val_dataset)}")
     logger.info(f"test dataset size: {len(test_dataset)}")
     return train_df, val_df, test_df
-
-
 
 
 def get_dataset_names():
