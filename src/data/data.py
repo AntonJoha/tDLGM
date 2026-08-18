@@ -597,7 +597,7 @@ def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
 
 def get_dataset_names():
     return [
-        "data/eth.ped",
+        "data/hotel.ped",
         "data/AirQualityUCI.csv",
         "data/pedestrian_counts_dataset.tsf",
         "data/solar_10_minutes_dataset.tsf",

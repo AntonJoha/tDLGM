@@ -89,6 +89,7 @@ class TDLGM(nn.Module):
         self.mse = nn.MSELoss()
         self.nllLoss = nn.GaussianNLLLoss()
         self.kl_multiplier = self.config.beta
+        self.kl_scaler = self.config.alpha
 
     def make_tdlgm_layer(self, config: TDLGMConfig) -> nn.ModuleDict:
         return nn.ModuleDict(
@@ -137,7 +138,7 @@ class TDLGM(nn.Module):
         return mean + torch.randn_like(std) * std
 
     def _sequence_summary(self, encoder: nn.Module, x: torch.Tensor) -> torch.Tensor:
-        return encoder(x).mean(dim=1)
+        return encoder(x)[..., -1, :]
 
     def _latent_pass(
         self,
@@ -202,7 +203,7 @@ class TDLGM(nn.Module):
                 if prior or mean_q is None
                 else self.reparameterize(mean_q, logvar_q)
             )
-            h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
+            h = layer["combinator"](torch.cat([t, h], dim=-1)) #+ layer["generator"](z)
 
 
         pred_mean = self._to_output_shape(self.model_mean(h))
@@ -313,7 +314,7 @@ class TDLGM(nn.Module):
         loss.backward()
         optimizer.step()
 
-        self.kl_multiplier = min(1, self.kl_multiplier * 1.01)
+        #self.kl_multiplier = min(1, self.kl_multiplier * self.kl_scaler )
         return float(loss)
 
     @torch.no_grad()

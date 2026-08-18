@@ -179,7 +179,7 @@ def train_model(
                 val_loss,
             )
             trial.report(val_loss, epoch)
-            if trial.should_prune() or val_loss > before * 2:
+            if trial.should_prune():
                 raise TrialPruned()
 
         if save_to is not None and (
@@ -225,20 +225,23 @@ def tune_hyperparameters(base_runtime: SeriesConfig) -> SeriesConfig:
     def objective(trial: optuna.Trial) -> float:
         runtime = replace(
             base_runtime,
-            hidden_dim=trial.suggest_categorical("hidden_dim", [ 8, 16, 32, 64]),
+            hidden_dim=trial.suggest_categorical("hidden_dim", [8, 16, 32, 64]),
+
             latent_dim=trial.suggest_categorical(
                 "latent_dim",
                 [8, 16, 32, 64, 128],
             ),
-            layers=trial.suggest_int("layers", 1, 6),
-            beta=trial.suggest_float("beta", 1e-5, 1, log=True),
-            alpha=trial.suggest_float("alpha", 1e-5, 1.0, log=True),
+            layers=trial.suggest_int("layers", 1, 3),
+            beta=trial.suggest_float("beta", 1e-3, 1, log=True),
+            alpha=trial.suggest_float("alpha", 1+1e-9, 1+1.1e-3, log=True),
+            
             learning_rate=trial.suggest_float(
                 "learning_rate",
-                1e-5,
-                1e-2,
+                1e-6,
+                1e-3,
                 log=True,
             ),
+            batch_size=trial.suggest_categorical("batch_size", [64, 128]),
             weight_decay=trial.suggest_float(
                 "weight_decay",
                 1e-8,
@@ -299,7 +302,7 @@ def parse_args() -> argparse.Namespace:
         "--horizon", type=int, default=1, help="Horizon for the time series dataset"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=32, help="Batch size for training"
+        "--batch_size", type=int, default=64, help="Batch size for training"
     )
     parser.add_argument(
         "--epochs", type=int, default=100, help="Number of training epochs"
@@ -307,7 +310,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=1e-3,
+        default=0.0002661901888489054,
         help="Learning rate for the optimizer",
     )
     parser.add_argument(
