@@ -105,6 +105,7 @@ def train_model(
         epoch_losses = []
         recon_loss = kl_loss = consistency = 0.0
         recon_loss_p = kl_loss_p = consistency_p = 0.0
+        model.epoch = epoch
 
         for batch in train_loader:
             x, y = unpack_batch(batch)
@@ -225,23 +226,25 @@ def tune_hyperparameters(base_runtime: SeriesConfig) -> SeriesConfig:
     def objective(trial: optuna.Trial) -> float:
         runtime = replace(
             base_runtime,
-            hidden_dim=trial.suggest_categorical("hidden_dim", [8, 16, 32, 64]),
+            hidden_dim=trial.suggest_categorical("hidden_dim", [32, 64, 128, 256, 512]),
 
             latent_dim=trial.suggest_categorical(
                 "latent_dim",
                 [8, 16, 32, 64, 128],
             ),
+            tdlgm_layers = trial.suggest_int(
+                "tdlgm_layers",
+                1,
+                4,),
             layers=trial.suggest_int("layers", 1, 3),
             beta=trial.suggest_float("beta", 1e-3, 1, log=True),
             alpha=trial.suggest_float("alpha", 1+1e-9, 1+1.1e-3, log=True),
-            
             learning_rate=trial.suggest_float(
                 "learning_rate",
-                1e-6,
-                1e-3,
-                log=True,
-            ),
-            batch_size=trial.suggest_categorical("batch_size", [64, 128]),
+                1e-5,
+                3e-3,
+                log=True,),
+            batch_size=trial.suggest_categorical("batch_size", [32, 64, 128, 256]),
             weight_decay=trial.suggest_float(
                 "weight_decay",
                 1e-8,

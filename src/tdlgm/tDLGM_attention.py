@@ -88,8 +88,9 @@ class TDLGM(nn.Module):
 
         self.mse = nn.MSELoss()
         self.nllLoss = nn.GaussianNLLLoss()
-        self.kl_multiplier = self.config.beta
-        self.kl_scaler = self.config.alpha
+        self.kl_multiplier = 0
+        self.beta_max = config.beta
+        self.epoch = 1
 
     def make_tdlgm_layer(self, config: TDLGMConfig) -> nn.ModuleDict:
         return nn.ModuleDict(
@@ -203,7 +204,7 @@ class TDLGM(nn.Module):
                 if prior or mean_q is None
                 else self.reparameterize(mean_q, logvar_q)
             )
-            h = layer["combinator"](torch.cat([t, h], dim=-1)) #+ layer["generator"](z)
+            h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
 
 
         pred_mean = self._to_output_shape(self.model_mean(h))
@@ -293,6 +294,8 @@ class TDLGM(nn.Module):
         optimizer: torch.optim.Optimizer,
     ) -> float:
         self.train()
+
+        self.kl_multiplier = self.beta_max * min(1.0,self.epoch+1 / 10,)
         optimizer.zero_grad()
         (
             pred_mean,
@@ -315,6 +318,7 @@ class TDLGM(nn.Module):
         optimizer.step()
 
         #self.kl_multiplier = min(1, self.kl_multiplier * self.kl_scaler )
+
         return float(loss)
 
     @torch.no_grad()
