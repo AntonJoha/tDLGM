@@ -145,16 +145,16 @@ def train_model(
                 val_loss,
             )
             logger.info(
-                " Posterior: NLL %.5f: kl_loss %.5f: Cons_loss %.5f",
+                " Posterior: NLL %.5f: kl_loss %.5f: rescaled kl %.5f",
                 recon_loss,
                 kl_loss,
-                consistency,
+                kl_loss/model.kl_multiplier,
             )
             logger.info(
-                " Prior: NLL %.5f: kl_loss %.5f: Cons_loss %.5f",
+                " Prior: NLL %.5f: kl_loss %.5f: rescaled kl %.5f",
                 recon_loss_p,
                 kl_loss_p,
-                consistency_p,
+                kl_loss_p/model.kl_multiplier,
             )
 
         if val_loss < best_val:
@@ -225,13 +225,13 @@ def tune_hyperparameters(base_runtime: SeriesConfig) -> SeriesConfig:
     def objective(trial: optuna.Trial) -> float:
         runtime = replace(
             base_runtime,
-            hidden_dim=trial.suggest_categorical("hidden_dim", [2, 4, 8, 16]),
+            hidden_dim=trial.suggest_categorical("hidden_dim", [ 8, 16, 32, 64]),
             latent_dim=trial.suggest_categorical(
                 "latent_dim",
                 [8, 16, 32, 64, 128],
             ),
             layers=trial.suggest_int("layers", 1, 6),
-            beta=trial.suggest_float("beta", 1e-6, 1e-1, log=True),
+            beta=trial.suggest_float("beta", 1e-5, 1, log=True),
             alpha=trial.suggest_float("alpha", 1e-5, 1.0, log=True),
             learning_rate=trial.suggest_float(
                 "learning_rate",

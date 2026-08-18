@@ -11,8 +11,8 @@ TDLGMConfig = SeriesConfig
 
 
 def _resolve_num_heads(hidden_dim: int) -> int:
-    for candidate in (8, 4, 2):
-        if hidden_dim % candidate == 0:
+    for candidate in (8, 4, 2, 1):
+        if hidden_dim % candidate == 0 and hidden_dim // candidate >= 16:
             return candidate
     return 1
 
@@ -88,7 +88,7 @@ class TDLGM(nn.Module):
 
         self.mse = nn.MSELoss()
         self.nllLoss = nn.GaussianNLLLoss()
-        self.kl_multiplier = 1.0
+        self.kl_multiplier = self.config.beta
 
     def make_tdlgm_layer(self, config: TDLGMConfig) -> nn.ModuleDict:
         return nn.ModuleDict(
@@ -204,6 +204,7 @@ class TDLGM(nn.Module):
             )
             h = layer["combinator"](torch.cat([t, h], dim=-1)) + layer["generator"](z)
 
+
         pred_mean = self._to_output_shape(self.model_mean(h))
         pred_logvar = self._to_output_shape(self.model_logvar(h))
         return (
@@ -260,6 +261,7 @@ class TDLGM(nn.Module):
             mean_q_list, logvar_q_list, mean_p_list, logvar_p_list
         ):
             kl += self.gaussian_kl(mean_q, logvar_q, mean_p, logvar_p)
+
         return rec, kl * self.kl_multiplier
 
     def compute_loss(
@@ -310,6 +312,8 @@ class TDLGM(nn.Module):
         )
         loss.backward()
         optimizer.step()
+
+        self.kl_multiplier = min(1, self.kl_multiplier * 1.01)
         return float(loss)
 
     @torch.no_grad()

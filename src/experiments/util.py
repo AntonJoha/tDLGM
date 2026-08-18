@@ -76,7 +76,7 @@ class SeriesConfig(BaselineConfig):
 
     # Training/tuning
     tuning_trials: int = 100
-    tuning_epochs: int = 5
+    tuning_epochs: int = 20
     tune: bool = False
 
     # Misc
