@@ -250,7 +250,7 @@ class TDLGM(nn.Module):
 
         self.train()
 
-        self.kl_multiplier = self.beta_max * min(1.0,self.epoch+1 / 10,)
+        self.kl_multiplier = self.beta_max * min(1.0, (self.epoch + 1) / 10)
         optimizer.zero_grad()
         (pred_mean,pred_logvar, mean_q_list,logvar_q_list,mean_p_list,logvar_p_list,) = self._latent_pass(x, y, prior=False)
         loss = self._compute_loss(
