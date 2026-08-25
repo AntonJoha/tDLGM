@@ -105,6 +105,7 @@ def train_model(
         epoch_losses = []
         recon_loss = kl_loss = consistency = 0.0
         recon_loss_p = kl_loss_p = consistency_p = 0.0
+        model.epoch = epoch
 
         for batch in train_loader:
             x, y = unpack_batch(batch)
@@ -145,16 +146,16 @@ def train_model(
                 val_loss,
             )
             logger.info(
-                " Posterior: NLL %.5f: kl_loss %.5f: Cons_loss %.5f",
+                " Posterior: NLL %.5f: kl_loss %.5f: rescaled kl %.5f",
                 recon_loss,
                 kl_loss,
-                consistency,
+                kl_loss/model.kl_multiplier,
             )
             logger.info(
-                " Prior: NLL %.5f: kl_loss %.5f: Cons_loss %.5f",
+                " Prior: NLL %.5f: kl_loss %.5f: rescaled kl %.5f",
                 recon_loss_p,
                 kl_loss_p,
-                consistency_p,
+                kl_loss_p/model.kl_multiplier,
             )
 
         if val_loss < best_val:
@@ -179,7 +180,7 @@ def train_model(
                 val_loss,
             )
             trial.report(val_loss, epoch)
-            if trial.should_prune() or val_loss > before * 2:
+            if trial.should_prune():
                 raise TrialPruned()
 
         if save_to is not None and (
@@ -225,20 +226,25 @@ def tune_hyperparameters(base_runtime: SeriesConfig) -> SeriesConfig:
     def objective(trial: optuna.Trial) -> float:
         runtime = replace(
             base_runtime,
-            hidden_dim=trial.suggest_categorical("hidden_dim", [2, 4, 8, 16]),
+            hidden_dim=trial.suggest_categorical("hidden_dim", [32, 64, 128, 256, 512]),
+
             latent_dim=trial.suggest_categorical(
                 "latent_dim",
                 [8, 16, 32, 64, 128],
             ),
-            layers=trial.suggest_int("layers", 1, 6),
-            beta=trial.suggest_float("beta", 1e-6, 1e-1, log=True),
-            alpha=trial.suggest_float("alpha", 1e-5, 1.0, log=True),
+            tdlgm_layers = trial.suggest_int(
+                "tdlgm_layers",
+                1,
+                4,),
+            layers=trial.suggest_int("layers", 1, 3),
+            beta=trial.suggest_float("beta", 1e-3, 1, log=True),
+            alpha=trial.suggest_float("alpha", 1+1e-9, 1+1.1e-3, log=True),
             learning_rate=trial.suggest_float(
                 "learning_rate",
                 1e-5,
-                1e-2,
-                log=True,
-            ),
+                3e-3,
+                log=True,),
+            batch_size=trial.suggest_categorical("batch_size", [32, 64, 128, 256]),
             weight_decay=trial.suggest_float(
                 "weight_decay",
                 1e-8,
@@ -299,7 +305,7 @@ def parse_args() -> argparse.Namespace:
         "--horizon", type=int, default=1, help="Horizon for the time series dataset"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=32, help="Batch size for training"
+        "--batch_size", type=int, default=64, help="Batch size for training"
     )
     parser.add_argument(
         "--epochs", type=int, default=100, help="Number of training epochs"
@@ -307,7 +313,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=1e-3,
+        default=0.0002661901888489054,
         help="Learning rate for the optimizer",
     )
     parser.add_argument(

@@ -7,7 +7,7 @@ benchmark:
 	python -m experiments.eval --verbose 
 
 baseline:
-	python -m experiments.main --verbose --baseline  --artifact_dir artifacts/baseline_tune --horizon 100 --epochs 1000 --learning_rate 0.0001
+	python -m experiments.main --verbose --baseline  --artifact_dir artifacts/baseline_tune --horizon 20 --epochs 1000 --learning_rate 0.0001
 	
 
 eval_baseline:
@@ -22,13 +22,13 @@ baseline_shampoo:
 	
 
 baseline_tune:
-	python -m experiments.main --verbose --baseline --tune --artifact_dir artifacts/baseline_tune --horizon 50
+	python -m experiments.main --verbose --baseline --tune --artifact_dir artifacts/baseline_tune --horizon 10
 
 tune:
-	python -m experiments.main --verbose --tune --horizon 50
+	python -m experiments.main --verbose --tune --horizon 10
 
 main:
-	python -m experiments.main --verbose --learning_rate 0.0001 --horizon 100 --epochs 1000
+	python -m experiments.main --verbose --learning_rate 0.0001 --horizon 20 --epochs 1000
 
 rvae_main:
 	python -m experiments.main_rvae --verbose --reduced_dataset 0.001 --learning_rate 0.01 

@@ -208,11 +208,35 @@ def tune_hyperparameters(base_runtime: SeriesConfig) -> SeriesConfig:
     def objective(trial: optuna.Trial) -> float:
         runtime = replace(
             base_runtime,
-            seq_len=trial.suggest_categorical("seq_len", [6, 8, 12]),
-            hidden_dim=trial.suggest_categorical("hidden_dim", [16, 32, 64, 128, 256]),
-            batch_size=trial.suggest_categorical("batch_size", [4, 8, 16, 32, 64, 128]),
-            layers=trial.suggest_categorical("layers", [1, 2, 3, 5, 10]),
-            learning_rate=trial.suggest_float("learning_rate", 1e-5, 5e-3, log=True),
+            seq_len=trial.suggest_categorical(
+                "seq_len",
+                [6, 8, 12, 16, 20, 32, 48],
+            ),
+            hidden_dim=trial.suggest_categorical(
+                "hidden_dim",
+                [16, 32, 64, 128, 256, 512],
+            ),
+            layers=trial.suggest_int(
+                "layers",
+                1,
+                4,
+            ),
+            batch_size=trial.suggest_categorical(
+                "batch_size",
+                [32, 64, 128, 256],
+            ),
+            learning_rate=trial.suggest_float(
+                "learning_rate",
+                1e-5,
+                5e-3,
+                log=True,
+            ),
+            weight_decay=trial.suggest_float(
+                "weight_decay",
+                1e-7,
+                1e-2,
+                log=True,
+            ),
         )
         _, after = train_model(runtime, epochs=runtime.tuning_epochs, trial=trial)
         return after

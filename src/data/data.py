@@ -168,6 +168,31 @@ def convert_tsf_to_dataframe(
         )
 
 
+
+class MaxMinDataset(Dataset):
+    def __init__(self, series, context_length, horizon, max_val, min_val):
+        self.series = torch.tensor(series, dtype=torch.float32)
+        self.context_length = context_length
+        self.horizon = horizon
+        max_val = torch.tensor(max_val, dtype=torch.float32)
+        min_val = torch.tensor(min_val, dtype=torch.float32)
+        self.diff = max_val - min_val
+
+
+
+    def __len__(self):
+        return max(0, len(self.series) - self.context_length - self.horizon + 1)
+
+    def __getitem__(self, idx):
+
+        x = (self.series[idx : idx + self.context_length]/self.diff)
+        y = (self.series[idx + self.context_length : idx + self.context_length + self.horizon]/self.diff)
+
+        return x, y
+
+
+
+
 class TimeSeriesDataset(Dataset):
     def __init__(self, series, context_length, horizon, mean, std):
         self.series = torch.tensor(series, dtype=torch.float32)
@@ -439,19 +464,90 @@ def get_shampoo_dataloaders(
     return train_loader, val_loader, test_loader
 
 
+
+def _ped_get_mean_std(train, test, val):
+    
+    arr = []
+
+    for files in [list(train.glob("*.txt")), list(test.glob("*.txt")), list(val.glob("*.txt"))]:
+        for file in files:
+            with open(file, "r") as f:
+                for line in f:
+                    values = line.split()[2:]  # keep columns 3 and onward
+                    arr.append(np.array(values))
+
+    arr = np.array(arr, dtype=np.float32)
+    print("arr shape", arr.shape)
+    max_val = np.max(arr, axis=0)
+    min_val = np.min(arr, axis=0)
+
+    return max_val, min_val
+
+def _ped_get_folder(ped_folder, context_length, horizon, max_val, min_val):
+
+    files = list(ped_folder.glob("*.txt"))
+
+    array_of_datasets = []
+
+
+
+    for file in files:
+        curr = []
+        with open(file, "r") as f:
+            for line in f:
+                values = line.split()[2:]  # keep columns 3 and onward
+                curr.append(np.array(values, dtype=np.float32))
+        array_of_datasets.append(MaxMinDataset(curr, context_length=context_length, horizon=horizon, max_val=max_val, min_val=min_val))
+
+    return ConcatDataset(array_of_datasets)
+
+def get_ped_dataset(
+    ped_file_path,
+    context_length,
+    horizon,
+    batch_size=32,
+    train_fraction=0.8,
+    reduced_dataset=None,
+    seed: int = 42):
+
+    ped_file_path = ped_file_path.with_suffix("")
+
+    ped_train = ped_file_path / "train"
+    ped_test = ped_file_path / "test"
+    ped_val = ped_file_path / "val"
+
+    max_val, min_val = _ped_get_mean_std(ped_train, ped_test, ped_val)
+
+    ped_train_dataset = _ped_get_folder(ped_train, context_length, horizon,  max_val, min_val)
+    pred_test_dataset = _ped_get_folder(ped_test, context_length, horizon,  max_val, min_val)
+    ped_val_dataset = _ped_get_folder(ped_val, context_length, horizon, max_val, min_val)
+
+    
+    test = DataLoader(pred_test_dataset, batch_size=batch_size, shuffle=False)
+    train = DataLoader(ped_train_dataset, batch_size=batch_size, shuffle=True)
+    val = DataLoader(ped_val_dataset, batch_size=batch_size, shuffle=False)
+
+
+    return test, train, val
+
+
 def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
     dataset_path = Path(get_dataset_names()[0])
     print(f"Loading dataset from {dataset_path}")
 
-    if config.shampoo_code or not dataset_path.exists():
-        if not dataset_path.exists() and not config.shampoo_code:
-            logger.warning(
-                "Dataset %s not found; falling back to the bundled shampoo data.",
-                dataset_path,
-            )
-        return get_shampoo_dataloaders(config)
-
     dataset = None
+
+    if dataset_path.suffix == ".ped":
+        return get_ped_dataset(
+            dataset_path,
+            config.seq_len,
+            config.horizon,
+            config.batch_size,
+            train_fraction=config.train_fraction,
+            reduced_dataset=config.reduced_dataset,
+            seed=getattr(config, "seed", 42),
+        )
+
     if dataset_path.suffix == ".tsf":
         dataset = get_tsf_dataset(
             dataset_path,
@@ -501,6 +597,7 @@ def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
 
 def get_dataset_names():
     return [
+        "data/univ.ped",
         "data/AirQualityUCI.csv",
         "data/pedestrian_counts_dataset.tsf",
         "data/solar_10_minutes_dataset.tsf",
