@@ -304,7 +304,7 @@ class TDLGM(nn.Module):
         return recon_loss + kl_loss
     
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         mean, logvar, *_  = self._latent_pass(x, None, prior=True)
         return mean, logvar
     
