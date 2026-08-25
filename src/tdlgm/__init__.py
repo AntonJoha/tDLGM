@@ -1,4 +1,5 @@
 from .tDLGM_attention import TDLGM as TDLGM_attention, TDLGMConfig
 from .tDLGM_rnn import TDLGM as TDLGM_rnn
+from .new_model import TDLGM as TDLGM_new
 
-__all__ = ["TDLGM_rnn", "TDLGM_attention", "TDLGMConfig",]
+__all__ = ["TDLGM_rnn", "TDLGM_attention", "TDLGMConfig", "TDLGM_new"]
