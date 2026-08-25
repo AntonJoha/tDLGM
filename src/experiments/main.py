@@ -20,7 +20,7 @@ from experiments.util import (
     save_checkpoint,
     save_config,
 )
-from tdlgm import TDLGM_attention, TDLGM_rnn, TDLGMConfig
+from tdlgm import TDLGM_new, TDLGM_rnn
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ def evaluate(model: TDLGM, loader: DataLoader) -> float:
     for batch in loader:
         x, y = unpack_batch(batch)
         mean, logvar, *_ = model(x)
+
         losses.append(float(model.nllLoss(mean, y.squeeze(-1), logvar.exp())))
     model.train()
     return sum(losses) / max(1, len(losses))
@@ -50,7 +51,7 @@ def evaluate(model: TDLGM, loader: DataLoader) -> float:
 
 def build_runtime_model(runtime: SeriesConfig) -> tuple[TDLGM, Adam]:
     if runtime.attention:
-        model = TDLGM_attention(runtime).to(device)
+        model = TDLGM_new(runtime).to(device)
     else:
         model = TDLGM_rnn(runtime).to(device)
     if runtime.verbose:
