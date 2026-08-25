@@ -93,9 +93,8 @@ class TDLGM(nn.Module):
         self.nllLoss = nn.GaussianNLLLoss()
         self.model_layers = self._make_tdlgm_layers(config)
 
-        
         self.beta_max = config.beta
-
+        self.epoch = 1
     
 
     def _make_tdlgm_layers(self, config: TDLGMConfig) -> nn.ModuleList:
