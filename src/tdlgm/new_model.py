@@ -104,7 +104,7 @@ class TDLGM(nn.Module):
                     
         return layers
 
-    def _make_tdlgm_layer(self, config: TDLGMConfig) -> nn.ModuleList:
+    def _make_tdlgm_layer(self, config: TDLGMConfig) -> nn.ModuleDict:
         return nn.ModuleDict(
                 {
                     "prior": _make_mlp(
