@@ -74,6 +74,9 @@ class Baseline(nn.Module):
     ) -> float:
         self.train()
         optimizer.zero_grad()
+        model_device = next(self.parameters()).device
+        x = x.to(model_device)
+        y = y.to(model_device)
         mean, logvar = self(x)
         loss = self.loss(mean, self._target(y, mean), logvar.exp())
         loss.backward()
@@ -82,6 +85,9 @@ class Baseline(nn.Module):
 
     @torch.no_grad()
     def get_loss(self, x: torch.Tensor, y: torch.Tensor) -> float:
+        model_device = next(self.parameters()).device
+        x = x.to(model_device)
+        y = y.to(model_device)
         mean, logvar = self(x)
         return float(self.loss(mean, self._target(y, mean), logvar.exp()))
 
