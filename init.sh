@@ -1,7 +1,2 @@
 #!/usr/bin/env bash
-
-
-python -m venv .venv
-source .venv/bin/activate
-pip install -e "."
-python -m tdlgm.main --help
+nix-shell --option extra-substituters 'https://cache.nixos-cuda.org' --option extra-trusted-public-keys 'cache.nixos-cuda.org:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oNan9M='
