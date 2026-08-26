@@ -1,8 +1,13 @@
 { }:
 
 let
-  pkgs = import (fetchTarball "https://github.com/NixOS/nixpkgs/archive/nixos-26.05.tar.gz") {};
-  
+  pkgs = import (fetchTarball "https://github.com/NixOS/nixpkgs/archive/nixos-26.05.tar.gz") {
+    config = {
+      allowUnfree = true;
+      cudaSupport = true;
+    };
+  };
+
   python = pkgs.python3.withPackages (ps: with ps; [
     jupyterlab
     ipykernel
@@ -10,13 +15,11 @@ let
     matplotlib
     numpy
     pandas
-    torch
+    torch-bin
     gymnasium
     pip
     ruff
     scikit-learn
-
-
   ]);
 
 in
@@ -31,11 +34,19 @@ pkgs.mkShell {
   packages = [
     python
   ];
+
   shellHook = ''
-    # Install the project in editable mode so imports resolve correctly.
-    export PYTHONPATH=$PWD/src:$PYTHONPATH
-    python -c "import next_state_predictor; print(next_state_predictor.__file__)"
-    echo "Run:  python -m next_state_predictor.main --help"
-    echo "Run:  jupyter notebook"
-    '';
+    # Make project imports resolve correctly.
+    export PYTHONPATH="$PWD/src:$PYTHONPATH"
+
+    # Expose the host NVIDIA driver to PyTorch.
+    # Do NOT add /usr/lib/x86_64-linux-gnu wholesale to LD_LIBRARY_PATH,
+    # since that can override Nix's glibc.
+    export LD_PRELOAD="/usr/lib/x86_64-linux-gnu/libcuda.so.1''${LD_PRELOAD:+:$LD_PRELOAD}"
+
+    python -c "import torch; print('CUDA WORKS: ', torch.cuda.is_available())"
+
+    echo "Run: python -m next_state_predictor.main --help"
+    echo "Run: jupyter notebook"
+  '';
 }
