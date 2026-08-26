@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+import torch.nn as nn
 import optuna
 import torch
 from optuna.exceptions import TrialPruned
@@ -20,7 +21,7 @@ from experiments.util import (
     save_checkpoint,
     save_config,
 )
-from tdlgm import TDLGM_new, TDLGM_rnn
+from tdlgm import TDLGM_new, TDLGM_attention
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
@@ -49,11 +50,11 @@ def evaluate(model: TDLGM, loader: DataLoader) -> float:
     return sum(losses) / max(1, len(losses))
 
 
-def build_runtime_model(runtime: SeriesConfig) -> tuple[TDLGM, Adam]:
-    if runtime.attention:
-        model = TDLGM_new(runtime).to(device)
+def build_runtime_model(runtime: SeriesConfig) -> tuple[nn.Module, Adam]:
+    if runtime.use_old:
+        model = TDLGM_attention(runtime).to(device)
     else:
-        model = TDLGM_rnn(runtime).to(device)
+        model = TDLGM_new(runtime).to(device)
     if runtime.verbose:
         logger.info(
             "Parameters: %s",
@@ -359,9 +360,9 @@ def parse_args() -> argparse.Namespace:
         help="Save a checkpoint every N epochs",
     )
     parser.add_argument(
-        "--attention",
+        "--use_old",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help=(
             "Use attention mechanism in the tDLGM model; use --no-attention to run the RNN-based model."
         ),

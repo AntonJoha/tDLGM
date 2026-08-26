@@ -82,7 +82,8 @@ class SeriesConfig(BaselineConfig):
     # Misc
     verbose: bool = False
     baseline: bool = False
-    attention: bool = True
+    use_old: bool = False
+    attention: bool = False  ### KEPT HERE FOR BACKWARD COMPATIBILITY, SHOULD BE REMOVED
 
 
 def checkpoint_payload(model: nn.Module, runtime: SeriesConfig) -> dict[str, object]:
