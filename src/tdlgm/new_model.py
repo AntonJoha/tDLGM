@@ -23,7 +23,7 @@ class SequenceAttentionEncoder(nn.Module):
                 d_model=hidden_dim,
                 nhead=_resolve_num_heads(hidden_dim),
                 dim_feedforward=hidden_dim * 4,
-                dropout=0.0,
+                dropout=0.1,
                 activation="gelu",
                 batch_first=True,
                 norm_first=True,
@@ -67,27 +67,29 @@ class TDLGM(nn.Module):
 
         self.prior_state = SequenceAttentionEncoder(
             input_dim=config.input_dim,
-            hidden_dim=config.hidden_dim,
+            hidden_dim=config.latent_dim,
             layers=config.layers,
             seq_len=config.seq_len,
         )
         self.posterior_state = SequenceAttentionEncoder(
             input_dim=config.input_dim,
-            hidden_dim=config.hidden_dim,
+            hidden_dim=config.latent_dim,
             layers=config.layers,
             seq_len=config.seq_len + config.horizon,
         )
 
         self.input_prior = _make_mlp(
-            input_dim=config.hidden_dim,
+            input_dim=config.latent_dim,
             hidden_dim=config.hidden_dim,
             output_dim=config.output_dim*2*config.horizon,
         )
         self.input_posterior = _make_mlp(
-            input_dim=config.hidden_dim,
+            input_dim=config.latent_dim,
             hidden_dim=config.hidden_dim,
             output_dim=config.output_dim*2*config.horizon,
         )
+
+        
         self.config = config
         
         self.nllLoss = nn.GaussianNLLLoss()
@@ -108,12 +110,12 @@ class TDLGM(nn.Module):
         return nn.ModuleDict(
                 {
                     "prior": _make_mlp(
-                        input_dim=config.hidden_dim,
+                        input_dim=config.latent_dim,
                         hidden_dim=config.hidden_dim,
                         output_dim=config.output_dim*2*config.horizon,
                     ),
                     "posterior": _make_mlp(
-                        input_dim=config.hidden_dim,
+                        input_dim=config.latent_dim,
                         hidden_dim=config.hidden_dim,
                         output_dim=config.output_dim*2*config.horizon,
                         ),
@@ -151,10 +153,8 @@ class TDLGM(nn.Module):
         return combined_mean, combined_logvar
 
     def _state_modification(self, state, layer_index):
-        if layer_index == 0:
-            return state.mean(dim=-2) # FIRST LAYER? ?? ?  ?  ??
-        else:
-            return state.mean(dim=-2) # OTHER LAYERS? ?? ?  ?  ??
+        steps = int((self.config.seq_len/self.config.layers))
+        return state[:,steps*layer_index:,:].mean(-2) # FIRST LAYER? ?? ?  ?  ??
 
 
 

@@ -86,10 +86,11 @@ def evaluate_baseline(model: nn.Module, loader: DataLoader) -> float:
     xs, means, logvars, ys = [], [], [], []
 
     for x, y in loader:
+        x = x.to(device)
+        y = y.to(device)
         mean, logvar = model(x)
         losses_position.append(nll_position(mean, y.squeeze(-1), logvar))
         mse_losses.append(float(mse_loss(mean, y.squeeze(-1)).mean()))
-        mse_losses_position.append(mse_position(mean, y.squeeze(-1)))
 
         losses.append(float(model.loss(mean, y.squeeze(-1), logvar.exp())))
         xs.append(x)

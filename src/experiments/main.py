@@ -193,7 +193,7 @@ def train_model(
             if runtime.verbose:
                 logger.info("Saved checkpoint to %s", saved_path)
 
-        if epochs_without_improvement >= early_stopping_patience:
+        if epochs_without_improvement >= early_stopping_patience and trial is None:
             if runtime.verbose:
                 logger.info(
                     "Early stopping after %d epochs without val NLL improvement.",
@@ -221,7 +221,7 @@ def train_model(
         )
         if runtime.verbose:
             logger.info("Saved checkpoint to %s", saved_path)
-    return before, after
+    return before, after, best_val
 
 
 def tune_hyperparameters(base_runtime: SeriesConfig) -> SeriesConfig:
@@ -254,8 +254,8 @@ def tune_hyperparameters(base_runtime: SeriesConfig) -> SeriesConfig:
                 log=True,
             ),
         )
-        _, after = train_model(runtime, epochs=runtime.tuning_epochs, trial=trial)
-        return after
+        _, _, best = train_model(runtime, epochs=runtime.tuning_epochs, trial=trial)
+        return best
 
     study = optuna.create_study(
         direction="minimize",
