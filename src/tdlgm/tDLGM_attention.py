@@ -27,7 +27,7 @@ class SequenceAttentionEncoder(nn.Module):
                 d_model=hidden_dim,
                 nhead=_resolve_num_heads(hidden_dim),
                 dim_feedforward=hidden_dim * 4,
-                dropout=0.0,
+                dropout=0.1,
                 activation="gelu",
                 batch_first=True,
                 norm_first=True,

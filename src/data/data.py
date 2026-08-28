@@ -465,11 +465,11 @@ def get_shampoo_dataloaders(
 
 
 
-def _ped_get_mean_std(train, test, val):
+def _ped_get_mean_std(train):
     
     arr = []
 
-    for files in [list(train.glob("*.txt")), list(test.glob("*.txt")), list(val.glob("*.txt"))]:
+    for files in [list(train.glob("*.txt"))]:
         for file in files:
             with open(file, "r") as f:
                 for line in f:
@@ -516,7 +516,7 @@ def get_ped_dataset(
     ped_test = ped_file_path / "test"
     ped_val = ped_file_path / "val"
 
-    max_val, min_val = _ped_get_mean_std(ped_train, ped_test, ped_val)
+    max_val, min_val = _ped_get_mean_std(ped_train)
 
     ped_train_dataset = _ped_get_folder(ped_train, context_length, horizon,  max_val, min_val)
     pred_test_dataset = _ped_get_folder(ped_test, context_length, horizon,  max_val, min_val)
@@ -528,10 +528,19 @@ def get_ped_dataset(
     val = DataLoader(ped_val_dataset, batch_size=batch_size, shuffle=False)
 
 
-    return test, train, val
+    return train, val, test
 
 
 def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
+    train_df, val_df, test_df = _make_dataloaders(config)
+
+    print("Train dataset len", len(train_df))
+    print("Val dataset len", len(val_df))
+    print("Test dataset len", len(test_df))
+    return train_df, val_df, test_df
+
+
+def _make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
     dataset_path = Path(get_dataset_names()[0])
     print(f"Loading dataset from {dataset_path}")
 
@@ -595,13 +604,17 @@ def make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
     return train_df, val_df, test_df
 
 
+
+
+
+
 def get_dataset_names():
     return [
-        "data/univ.ped",
+        "data/eth.ped",
+        "data/covid_deaths_dataset.tsf",
         "data/AirQualityUCI.csv",
         "data/pedestrian_counts_dataset.tsf",
         "data/solar_10_minutes_dataset.tsf",
         "data/m1_monthly_dataset.tsf",
-        "data/covid_deaths_dataset.tsf",
         "data/traffic_weekly_dataset.tsf",
     ]
