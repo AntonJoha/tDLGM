@@ -10,7 +10,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from data.data import make_dataloaders
+from data.data import make_dataloaders, get_scale_constant
 from experiments.baseline import Baseline
 from experiments.main import unpack_batch
 from experiments.util import SeriesConfig, configure_logging, load_checkpoint
@@ -66,6 +66,23 @@ def nll_position(
     return loss
 
 
+def fde_position(mean: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    if mean.ndim == 2:
+        mean = mean.unsqueeze(-1)
+    if y.ndim == 2:
+        y = y.unsqueeze(-1)
+    loss = torch.linalg.vector_norm(mean[:,-1,:] - y[:,-1,:], dim=-1).mean()
+    return loss
+
+def ade_position(mean: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    if mean.ndim == 2:
+        mean = mean.unsqueeze(-1)
+    if y.ndim == 2:
+        y = y.unsqueeze(-1)
+    loss = torch.linalg.vector_norm(mean - y, dim=-1).mean()
+    return loss
+
+
 def mse_position(mean: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     if mean.ndim == 2:
         mean = mean.unsqueeze(-1)
@@ -77,12 +94,17 @@ def mse_position(mean: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def evaluate_baseline(model: nn.Module, loader: DataLoader) -> float:
+def evaluate_baseline(model: nn.Module, loader: DataLoader, scaler) -> float:
     model.eval()
     losses = []
     mse_losses = []
     losses_position = []
     mse_losses_position = []
+    ade_losses_position = []
+    fde_losses_position = []
+    fde_losses = []
+    ade_losses = []
+
     xs, means, logvars, ys = [], [], [], []
 
     for x, y in loader:
@@ -91,6 +113,11 @@ def evaluate_baseline(model: nn.Module, loader: DataLoader) -> float:
         mean, logvar = model(x)
         losses_position.append(nll_position(mean, y.squeeze(-1), logvar))
         mse_losses.append(float(mse_loss(mean, y.squeeze(-1)).mean()))
+        mse_losses_position.append(mse_position(mean, y.squeeze(-1)))
+        ade_losses_position.append(ade_position(mean, y.squeeze(-1)))
+        ade_losses.append(float(ade_position(mean, y.squeeze(-1)).mean()))
+        fde_losses_position.append(fde_position(mean, y.squeeze(-1)))
+        fde_losses.append(float(fde_position(mean, y.squeeze(-1)).mean()))
 
         losses.append(float(model.loss(mean, y.squeeze(-1), logvar.exp())))
         xs.append(x)
@@ -112,11 +139,19 @@ def evaluate_baseline(model: nn.Module, loader: DataLoader) -> float:
         "mse_losses_position": mse_losses_position,
         "mse_loss_position": sum(mse_losses_position)
         / max(1, len(mse_losses_position)),
+        "ade_losses_position": ade_losses_position,
+        "ade_loss_position": sum(ade_losses_position)        / max(1, len(ade_losses_position)),
+        "ade_losses": ade_losses,
+        "ade_loss": sum(ade_losses) / max(1, len(ade_losses)),
+        "fde_losses_position": fde_losses_position,
+        "fde_loss_position": sum(fde_losses_position)        / max(1, len(fde_losses_position)),
+        "fde_losses": fde_losses,
+        "fde_loss": sum(fde_losses) / max(1, len(fde_losses)),
     }
 
 
 @torch.no_grad()
-def evaluate_tdlgm(model: nn.Module, loader: DataLoader) -> float:
+def evaluate_tdlgm(model: nn.Module, loader: DataLoader, scaler) -> float:
     logger.info("Evaluating tDLGM model...")
 
     model.eval()
@@ -125,16 +160,45 @@ def evaluate_tdlgm(model: nn.Module, loader: DataLoader) -> float:
     mse_losses = []
     mse_losses_position = []
     losses_position = []
+    ade_losses_position = []
+    fde_losses_position = []
+    fde_losses = []
+    ade_losses = []
+
+
+
+
     xs, means, logvars, ys = [], [], [], []
+    ys_scaled = []
+    xs_scaled = []
+    means_scaled = []
+    logvars_scaled = []
     for batch in loader:
         x, y = unpack_batch(batch)
         mean, logvar, *_ = model(x)
+        mean_scaled = scaler[0](mean)
+        y_scaled = scaler[0](y)
+        logvar_scaled = scaler[1](logvar)
+        x_scaled = scaler[0](x)
+
+        ys_scaled.append(y_scaled)
+        xs_scaled.append(x_scaled)
+        means_scaled.append(mean_scaled)
+        logvars_scaled.append(logvar_scaled)
 
         losses.append(float(model.nllLoss(mean, y.squeeze(-1), logvar.exp())))
         losses_position.append(nll_position(mean, y.squeeze(-1), logvar))
 
         mse_losses.append(float(mse_loss(mean, y.squeeze(-1)).mean()))
         mse_losses_position.append(mse_position(mean, y.squeeze(-1)))
+
+        ade_losses_position.append(ade_position(mean_scaled, y_scaled.squeeze(-1)))
+        ade_losses.append(float(ade_position(mean_scaled, y_scaled.squeeze(-1)).mean()))
+        fde_losses_position.append(fde_position(mean_scaled, y_scaled.squeeze(-1)))
+        fde_losses.append(float(fde_position(mean_scaled, y_scaled.squeeze(-1)).mean()))
+
+
+
         xs.append(x)
         means.append(mean)
         logvars.append(logvar)
@@ -142,9 +206,13 @@ def evaluate_tdlgm(model: nn.Module, loader: DataLoader) -> float:
 
     return {
         "x": xs,
+        "x_scaled": xs_scaled,
         "mean": means,
         "logvar": logvars,
+        "mean_scaled": means_scaled,
+        "logvar_scaled": logvars_scaled,
         "y": ys,
+        "y_scaled": ys_scaled,
         "losses": losses,
         "losses_position": losses_position,
         "loss": sum(losses) / max(1, len(losses)),
@@ -154,6 +222,14 @@ def evaluate_tdlgm(model: nn.Module, loader: DataLoader) -> float:
         "mse_losses_position": mse_losses_position,
         "mse_loss_position": sum(mse_losses_position)
         / max(1, len(mse_losses_position)),
+        "ade_losses_position": ade_losses_position,
+        "ade_loss_position": sum(ade_losses_position)        / max(1, len(ade_losses_position)),
+        "ade_losses": ade_losses,
+        "ade_loss": sum(ade_losses) / max(1, len(ade_losses)),
+        "fde_losses_position": fde_losses_position,
+        "fde_loss_position": sum(fde_losses_position)        / max(1, len(fde_losses_position)),
+        "fde_losses": fde_losses,
+        "fde_loss": sum(fde_losses) / max(1, len(fde_losses)),
     }
 
 
@@ -180,11 +256,13 @@ def _set_input_output_dim(runtime: SeriesConfig, loader: DataLoader) -> None:
 
 def benchmark_model(args, model_path: Path) -> None:
     runtime, model_config, model_state, _model_class = load_checkpoint(model_path)
-    runtime.reduced_dataset = 1  # SHOULD ALWAYS EVALUATE ON WHOLE DATASET BUT FOR NOW WE'LL USE REDUCED DATASET FOR SPEED
+    runtime.reduced_dataset = 1
+
     runtime = replace(runtime, output_dim=runtime.horizon)
     runtime = replace(runtime, batch_size=args.batch_size)
 
     _, _, test_loader = make_dataloaders(runtime)
+    scaler = get_scale_constant(runtime)
     _set_input_output_dim(runtime, test_loader)
 
     res = None
@@ -196,15 +274,18 @@ def benchmark_model(args, model_path: Path) -> None:
 
         model.load_state_dict(model_state)
         _, _, test_loader = make_dataloaders(runtime)
-        res = evaluate_tdlgm(model, test_loader)
+        res = evaluate_tdlgm(model, test_loader, scaler)
     elif runtime.model_name == "baseline":
         model = Baseline(runtime).to(device)
         model.load_state_dict(model_state)
         _, _, test_loader = make_dataloaders(runtime)
-        res = evaluate_baseline(model, test_loader)
+        res = evaluate_baseline(model, test_loader, scaler)
 
     print(
         f"Model: {runtime.model_name}, Checkpoint: {model_path}, Test Loss: {res['loss']:.5f}, NLL Position Loss: {res['loss_position']}, Test MSE Loss: {res['mse_loss']:.5f} MSE Position Loss: {res['mse_loss_position']}"
+    )
+    print(
+        f"Test ADE Position Loss: {res['ade_loss_position']:.5f}, Test FDE Position Loss: {res['fde_loss_position']:.5f}, Test ADE Loss: {res['ade_loss']:.5f}, Test FDE Loss: {res['fde_loss']:.5f}"
     )
 
     return remove_pytorch(res)

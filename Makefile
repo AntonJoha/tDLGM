@@ -21,7 +21,7 @@ tune:
 	python -m experiments.main --verbose --tune --horizon 20
 
 main:
-	python -m experiments.main --verbose --learning_rate 0.0001 --horizon 20 --epochs 1000
+	python -m experiments.main --verbose --learning_rate 0.0001 --horizon 20 --epochs 1
 
 
 eval_new:
@@ -29,6 +29,9 @@ eval_new:
 
 eval:
 	python -m experiments.eval --verbose  --checkpoint_path artifacts/tune/checkpoint_epochbest_20260827-092541.pt
+
+eval_debug:
+	python -m experiments.eval --verbose  --checkpoint_path artifacts/tdlgm/checkpoint_epochfinal_20260828-103115.pt
 
 lint:
 	./lint.sh

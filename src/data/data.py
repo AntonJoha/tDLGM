@@ -605,8 +605,36 @@ def _make_dataloaders(config) -> tuple[DataLoader, DataLoader, DataLoader]:
 
 
 
+def ped_rescale(series, max_val, min_val):
+    diff = max_val - min_val
+    return (series - min_val) / diff
+
+def ped_get_min_max(path):
+
+    ped_file_path = path.with_suffix("")
+    ped_train = ped_file_path / "train"
+    max_val, min_val = _ped_get_mean_std(ped_train)
+
+    return max_val, min_val
 
 
+def get_scale_constant(runtime):
+    """
+    Returns lambda that redo the normalization of the data. This is used to scale the output of the model back to the original scale.
+    """
+    
+    dataset_path = Path(get_dataset_names()[0])
+    print(f"Loading dataset from {dataset_path}")
+
+    if dataset_path.suffix == ".ped":
+        max_val, min_val = ped_get_min_max(dataset_path)
+        diff = max_val - min_val
+        print("MAX", max_val, "MIN", min_val, "DIFF", diff)
+        return lambda x: x * diff , lambda x: x + 2 * np.log(diff) 
+
+    else:
+        #TODO : Implement scaling for other dataset types
+        return lambda x: x
 
 def get_dataset_names():
     return [
