@@ -80,6 +80,7 @@ def ade_position(mean: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     if y.ndim == 2:
         y = y.unsqueeze(-1)
     loss = torch.linalg.vector_norm(mean - y, dim=-1).mean()
+    print("Expected: ", y, " Predicted: ", mean)
     return loss
 
 
@@ -175,6 +176,8 @@ def evaluate_tdlgm(model: nn.Module, loader: DataLoader, scaler) -> float:
     logvars_scaled = []
     for batch in loader:
         x, y = unpack_batch(batch)
+        print("X: ", x, "Y", y)
+
         mean, logvar, *_ = model(x)
         mean_scaled = scaler[0](mean)
         y_scaled = scaler[0](y)

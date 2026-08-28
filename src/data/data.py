@@ -177,6 +177,7 @@ class MaxMinDataset(Dataset):
         max_val = torch.tensor(max_val, dtype=torch.float32)
         min_val = torch.tensor(min_val, dtype=torch.float32)
         self.diff = max_val - min_val
+        self.diff = 1 # FOR DEBUGGING
 
 
 
@@ -483,23 +484,52 @@ def _ped_get_mean_std(train):
 
     return max_val, min_val
 
-def _ped_get_folder(ped_folder, context_length, horizon, max_val, min_val):
+from collections import defaultdict
 
+def _ped_get_folder(
+    ped_folder,
+    context_length,
+    horizon,
+    max_val,
+    min_val,
+):
     files = list(ped_folder.glob("*.txt"))
 
-    array_of_datasets = []
-
-
+    datasets = []
 
     for file in files:
-        curr = []
+
+        trajectories = defaultdict(list)
+
         with open(file, "r") as f:
             for line in f:
-                values = line.split()[2:]  # keep columns 3 and onward
-                curr.append(np.array(values, dtype=np.float32))
-        array_of_datasets.append(MaxMinDataset(curr, context_length=context_length, horizon=horizon, max_val=max_val, min_val=min_val))
+                frame, ped_id, x, y = map(float, line.split())
 
-    return ConcatDataset(array_of_datasets)
+                trajectories[int(ped_id)].append(
+                    (frame, x, y)
+                )
+
+        for ped_id, traj in trajectories.items():
+
+            traj.sort(key=lambda t: t[0])
+
+            coords = np.array(
+                [[x, y] for _, x, y in traj],
+                dtype=np.float32,
+            )
+
+            if len(coords) >= context_length + horizon:
+                datasets.append(
+                    MaxMinDataset(
+                        coords,
+                        context_length=context_length,
+                        horizon=horizon,
+                        max_val=max_val,
+                        min_val=min_val,
+                    )
+                )
+
+    return ConcatDataset(datasets)
 
 def get_ped_dataset(
     ped_file_path,
@@ -629,8 +659,9 @@ def get_scale_constant(runtime):
     if dataset_path.suffix == ".ped":
         max_val, min_val = ped_get_min_max(dataset_path)
         diff = max_val - min_val
+        diff = 1 # FOR DEBUGGING
         print("MAX", max_val, "MIN", min_val, "DIFF", diff)
-        return lambda x: x * diff , lambda x: x + 2 * np.log(diff) 
+        return lambda x: x.cpu() * diff , lambda x: x.cpu() + 2 * np.log(diff) 
 
     else:
         #TODO : Implement scaling for other dataset types
